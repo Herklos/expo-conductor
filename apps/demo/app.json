@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "Conductor Demo",
+    "slug": "expo-conductor-demo",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.expoconductor.demo",
+      "infoPlist": {
+        "UIBackgroundModes": ["fetch", "processing"]
+      }
+    },
+    "android": {
+      "package": "com.expoconductor.demo"
+    },
+    "plugins": [
+      [
+        "expo-conductor",
+        {
+          "enableFcm": false,
+          "enableExactAlarms": true,
+          "backgroundTaskIdentifiers": ["com.expoconductor.refresh"]
+        }
+      ]
+    ]
+  }
+}
