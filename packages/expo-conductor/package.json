@@ -1,0 +1,56 @@
+{
+  "name": "expo-conductor",
+  "version": "0.1.0",
+  "description": "Define tasks in an Expo app with rich execution policies (time, notifications, FCM/push, alarms, background) — priority, resource weight, recurrence and constraints. Native-first engine on Android (Kotlin) and iOS (Swift) with a Web implementation.",
+  "main": "build/index.js",
+  "types": "build/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf build",
+    "test": "jest",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint \"src/**/*.{ts,tsx}\""
+  },
+  "keywords": [
+    "expo",
+    "react-native",
+    "expo-modules",
+    "task",
+    "scheduler",
+    "background-task",
+    "notifications",
+    "fcm",
+    "alarm",
+    "cron",
+    "recurrence"
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/herklos/expo-conductor",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/herklos/expo-conductor.git"
+  },
+  "files": [
+    "build",
+    "android",
+    "ios",
+    "plugin/build",
+    "expo-module.config.json",
+    "app.plugin.js",
+    "!**/__tests__/**",
+    "!**/build/test/**"
+  ],
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "@types/react": "~18.3.12",
+    "expo-modules-core": "*",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "typescript": "~5.8.3"
+  }
+}

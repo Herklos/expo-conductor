@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android", "web"],
+  "apple": {
+    "modules": ["ExpoConductorModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.conductor.ExpoConductorModule"]
+  }
+}

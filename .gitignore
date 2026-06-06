@@ -1,0 +1,30 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# builds
+build/
+dist/
+*.tsbuildinfo
+
+# expo
+.expo/
+.expo-shared/
+web-build/
+apps/*/android/
+apps/*/ios/
+
+# native build
+**/.gradle/
+**/.kotlin/
+**/build/
+*.xcworkspace
+Pods/
+
+# logs / os
+*.log
+.DS_Store
+coverage/
+
+# env
+.env*.local

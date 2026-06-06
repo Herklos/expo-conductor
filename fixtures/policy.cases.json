@@ -1,0 +1,71 @@
+{
+  "description": "evaluate(constraints, context) -> {eligible, reason}. Checks run in this order, first failure wins: EXPIRED, BEFORE_WINDOW, AFTER_WINDOW, REQUIRES_CHARGING, BATTERY_TOO_LOW, NETWORK_UNAVAILABLE, NETWORK_NOT_UNMETERED, REQUIRES_IDLE. networkType is one of none|metered|unmetered.",
+  "cases": [
+    {
+      "name": "all constraints satisfied",
+      "constraints": { "window": { "earliest": 0, "latest": 100000 }, "expiresAt": 1000000, "requiresCharging": true, "minBatteryLevel": 0.2, "network": "unmetered", "requiresIdle": true },
+      "context": { "now": 1000, "batteryLevel": 0.9, "charging": true, "networkType": "unmetered", "idle": true },
+      "expected": { "eligible": true, "reason": "ELIGIBLE" }
+    },
+    {
+      "name": "no constraints is always eligible",
+      "constraints": {},
+      "context": { "now": 1000, "batteryLevel": 0.1, "charging": false, "networkType": "none", "idle": false },
+      "expected": { "eligible": true, "reason": "ELIGIBLE" }
+    },
+    {
+      "name": "before window",
+      "constraints": { "window": { "earliest": 100 } },
+      "context": { "now": 50, "batteryLevel": 1, "charging": true, "networkType": "unmetered", "idle": true },
+      "expected": { "eligible": false, "reason": "BEFORE_WINDOW" }
+    },
+    {
+      "name": "after window",
+      "constraints": { "window": { "latest": 100 } },
+      "context": { "now": 200, "batteryLevel": 1, "charging": true, "networkType": "unmetered", "idle": true },
+      "expected": { "eligible": false, "reason": "AFTER_WINDOW" }
+    },
+    {
+      "name": "expired beats after-window and charging",
+      "constraints": { "expiresAt": 1000, "window": { "latest": 100 }, "requiresCharging": true },
+      "context": { "now": 2000, "batteryLevel": 1, "charging": false, "networkType": "unmetered", "idle": true },
+      "expected": { "eligible": false, "reason": "EXPIRED" }
+    },
+    {
+      "name": "requires charging",
+      "constraints": { "requiresCharging": true },
+      "context": { "now": 10, "batteryLevel": 1, "charging": false, "networkType": "unmetered", "idle": true },
+      "expected": { "eligible": false, "reason": "REQUIRES_CHARGING" }
+    },
+    {
+      "name": "battery too low",
+      "constraints": { "minBatteryLevel": 0.2 },
+      "context": { "now": 10, "batteryLevel": 0.1, "charging": false, "networkType": "unmetered", "idle": true },
+      "expected": { "eligible": false, "reason": "BATTERY_TOO_LOW" }
+    },
+    {
+      "name": "network any but offline",
+      "constraints": { "network": "any" },
+      "context": { "now": 10, "batteryLevel": 1, "charging": true, "networkType": "none", "idle": true },
+      "expected": { "eligible": false, "reason": "NETWORK_UNAVAILABLE" }
+    },
+    {
+      "name": "network unmetered required but metered",
+      "constraints": { "network": "unmetered" },
+      "context": { "now": 10, "batteryLevel": 1, "charging": true, "networkType": "metered", "idle": true },
+      "expected": { "eligible": false, "reason": "NETWORK_NOT_UNMETERED" }
+    },
+    {
+      "name": "network none constraint ignores connectivity",
+      "constraints": { "network": "none" },
+      "context": { "now": 10, "batteryLevel": 1, "charging": true, "networkType": "none", "idle": true },
+      "expected": { "eligible": true, "reason": "ELIGIBLE" }
+    },
+    {
+      "name": "requires idle",
+      "constraints": { "requiresIdle": true },
+      "context": { "now": 10, "batteryLevel": 1, "charging": true, "networkType": "unmetered", "idle": false },
+      "expected": { "eligible": false, "reason": "REQUIRES_IDLE" }
+    }
+  ]
+}

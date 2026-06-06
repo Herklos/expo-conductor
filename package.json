@@ -1,0 +1,22 @@
+{
+  "name": "expo-conductor-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Monorepo for expo-conductor: a task orchestration Expo native module, plus a demo app.",
+  "license": "MIT",
+  "scripts": {
+    "build": "pnpm --filter expo-conductor build",
+    "test": "pnpm --filter expo-conductor test",
+    "test:kotlin": "cd packages/expo-conductor/android/engine-jvm && gradle test --console=plain",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "lint": "pnpm -r --if-present lint",
+    "demo": "pnpm --filter demo start"
+  },
+  "devDependencies": {
+    "typescript": "~5.8.3"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=20"
+  }
+}
