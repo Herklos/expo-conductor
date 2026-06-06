@@ -113,4 +113,36 @@ describe('ConductorClient', () => {
     await flush();
     expect(backend.results).toEqual([{ id: 'job', result: TaskResult.SUCCESS }]);
   });
+
+  it('dispatches to the shared handler when task id differs from handler name', async () => {
+    // Regression for the handler-name vs taskId mismatch: several dynamically-id'd
+    // tasks all point at one named handler.
+    const backend = new MockBackend();
+    const conductor = new ConductorClient(backend);
+    const ran: string[] = [];
+    conductor.defineTask('sync', (ctx) => {
+      ran.push(ctx.taskId);
+      return TaskResult.SUCCESS;
+    });
+    await conductor.schedule({
+      id: 'once-0',
+      handler: { name: 'sync', type: 'js' },
+      triggers: [{ type: 'time', inSeconds: 1 }],
+    });
+    await conductor.schedule({
+      id: 'once-1',
+      handler: { name: 'sync', type: 'js' },
+      triggers: [{ type: 'time', inSeconds: 1 }],
+    });
+
+    backend.emitExecute('once-0');
+    backend.emitExecute('once-1');
+    await flush();
+
+    expect(ran).toEqual(['once-0', 'once-1']);
+    expect(backend.results).toEqual([
+      { id: 'once-0', result: TaskResult.SUCCESS },
+      { id: 'once-1', result: TaskResult.SUCCESS },
+    ]);
+  });
 });

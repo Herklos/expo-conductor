@@ -35,8 +35,10 @@ public enum RecurrenceEngine {
   }
 
   private static func nextCron(_ expression: String, _ fromMs: Int) -> Int? {
-    let fields = expression.trimmingCharacters(in: .whitespaces).split(whereSeparator: { $0 == " " || $0 == "\t" })
-    precondition(fields.count == 3, "Invalid cron expression \"\(expression)\" (expected \"minute hour dayOfWeek\")")
+    let fields = expression.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "\n" || $0 == "\r" })
+    // A malformed expression yields no next run (matches the TS engine, which surfaces
+    // an error rather than aborting the process).
+    guard fields.count == 3 else { return nil }
     let minuteField = String(fields[0])
     let hourField = String(fields[1])
     let dowField = String(fields[2])

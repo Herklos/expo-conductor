@@ -7,9 +7,18 @@ enum TaskMapper {
 
   private static let presets: [String: ResourceWeight] = WeightEngine.presets
 
+  /// Safely coerce a bridge/JSON value to Int (values may arrive as Int, Double or
+  /// NSNumber). Avoids `as! Int` crashes on malformed payloads.
+  private static func int(_ value: Any?) -> Int? {
+    if let i = value as? Int { return i }
+    if let n = value as? NSNumber { return n.intValue }
+    if let d = value as? Double { return Int(d) }
+    return nil
+  }
+
   static func normalize(_ def: [String: Any], now: Int) -> [String: Any] {
     var task = def
-    let id = def["id"] as! String
+    let id = (def["id"] as? String) ?? ""
 
     if task["handler"] == nil {
       task["handler"] = ["name": id, "type": "js"]
@@ -56,10 +65,18 @@ enum TaskMapper {
       return nil
     }
     switch r["kind"] as? String {
-    case "interval": return .interval(everyMs: r["everyMs"] as! Int, anchor: r["anchor"] as? Int ?? 0)
-    case "daily": return .daily(hour: r["hour"] as! Int, minute: r["minute"] as! Int)
-    case "weekly": return .weekly(weekday: r["weekday"] as! Int, hour: r["hour"] as! Int, minute: r["minute"] as! Int)
-    case "cron": return .cron(expression: r["expression"] as! String)
+    case "interval":
+      guard let everyMs = int(r["everyMs"]) else { return nil }
+      return .interval(everyMs: everyMs, anchor: int(r["anchor"]) ?? 0)
+    case "daily":
+      guard let hour = int(r["hour"]), let minute = int(r["minute"]) else { return nil }
+      return .daily(hour: hour, minute: minute)
+    case "weekly":
+      guard let weekday = int(r["weekday"]), let hour = int(r["hour"]), let minute = int(r["minute"]) else { return nil }
+      return .weekly(weekday: weekday, hour: hour, minute: minute)
+    case "cron":
+      guard let expression = r["expression"] as? String else { return nil }
+      return .cron(expression: expression)
     default: return nil
     }
   }
@@ -92,9 +109,9 @@ enum TaskMapper {
 
   static func weightedTask(_ task: [String: Any], now: Int) -> WeightEngine.Task {
     WeightEngine.Task(
-      id: task["id"] as! String,
-      priority: task["priority"] as? Int ?? 0,
-      dueAt: task["nextRunAt"] as? Int ?? now,
+      id: (task["id"] as? String) ?? "",
+      priority: int(task["priority"]) ?? 0,
+      dueAt: int(task["nextRunAt"]) ?? now,
       weight: weight(task["weight"])
     )
   }
@@ -105,10 +122,10 @@ enum TaskMapper {
       for t in triggers {
         switch t["type"] as? String {
         case "time", "notification":
-          if let at = t["at"] as? Int { candidates.append(at) }
-          else if let inSeconds = t["inSeconds"] as? Int { candidates.append(now + inSeconds * 1000) }
+          if let at = int(t["at"]) { candidates.append(at) }
+          else if let inSeconds = int(t["inSeconds"]) { candidates.append(now + inSeconds * 1000) }
         case "alarm":
-          if let at = t["at"] as? Int { candidates.append(at) }
+          if let at = int(t["at"]) { candidates.append(at) }
         case "recurrence":
           if let r = t["recurrence"] as? [String: Any],
              let rec = parseRecurrence(["recurrence": r]),

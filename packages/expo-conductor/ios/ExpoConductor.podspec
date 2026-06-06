@@ -22,7 +22,8 @@ Pod::Spec.new do |s|
     'SWIFT_COMPILATION_MODE' => 'wholemodule'
   }
 
-  # Engine + module + triggers. Test sources live under Tests/ and are excluded.
-  s.source_files = '**/*.{h,m,mm,swift,hpp,cpp}'
-  s.exclude_files = 'Tests/**/*'
+  # Engine + module + triggers only. The SwiftPM manifest (Package.swift) and the
+  # XCTest sources under Tests/ must NOT be compiled into the app target.
+  s.source_files = '*.swift', 'Engine/**/*.swift', 'Triggers/**/*.swift'
+  s.exclude_files = 'Tests/**/*', 'Package.swift'
 end

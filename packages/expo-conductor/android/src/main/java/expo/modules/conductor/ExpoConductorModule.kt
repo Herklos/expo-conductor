@@ -33,6 +33,12 @@ class ExpoConductorModule : Module() {
     get() = appContext.reactContext ?: throw IllegalStateException("No React context")
 
   private val store: TaskStore by lazy { TaskStore(context) }
+  private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+  /** Emit a JS event on the main thread (triggers run on WorkManager/alarm threads). */
+  private fun emit(name: String, payload: Map<String, Any?>) {
+    mainHandler.post { sendEvent(name, payload) }
+  }
 
   override fun definition() = ModuleDefinition {
     Name("ExpoConductorModule")
@@ -41,6 +47,7 @@ class ExpoConductorModule : Module() {
 
     OnCreate {
       INSTANCE = this@ExpoConductorModule
+      paused = store.isPaused()
     }
     OnDestroy {
       if (INSTANCE === this@ExpoConductorModule) INSTANCE = null
@@ -72,11 +79,13 @@ class ExpoConductorModule : Module() {
 
     AsyncFunction("pauseAsync") {
       paused = true
+      store.setPaused(true)
       store.all().forEach { unschedule(it.optString("id")) }
     }
 
     AsyncFunction("resumeAsync") {
       paused = false
+      store.setPaused(false)
       store.all().forEach { schedule(it) }
     }
 
@@ -164,7 +173,7 @@ class ExpoConductorModule : Module() {
     val handlerType = task.optJSONObject("handler")?.optString("type") ?: "js"
     val handlerName = task.optJSONObject("handler")?.optString("name") ?: id
 
-    sendEvent("onTaskExecute", mapOf(
+    emit("onTaskExecute", mapOf(
       "taskId" to id,
       "triggerType" to TaskMapper.primaryTriggerType(task),
       "firedAt" to System.currentTimeMillis(),
@@ -192,11 +201,11 @@ class ExpoConductorModule : Module() {
   private fun deviceContext() = DeviceInfo.read(context, System.currentTimeMillis())
 
   private fun emitComplete(id: String, result: String) {
-    sendEvent("onTaskComplete", mapOf("taskId" to id, "result" to result, "firedAt" to System.currentTimeMillis(), "attempt" to 1, "triggerType" to "background"))
+    emit("onTaskComplete", mapOf("taskId" to id, "result" to result, "firedAt" to System.currentTimeMillis(), "attempt" to 1, "triggerType" to "background"))
   }
 
   private fun emitSkipped(id: String, reason: String) {
-    sendEvent("onTaskSkipped", mapOf("taskId" to id, "reason" to reason))
+    emit("onTaskSkipped", mapOf("taskId" to id, "reason" to reason))
   }
 
   companion object {

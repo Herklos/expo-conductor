@@ -144,6 +144,58 @@ describe('WebSchedulerEngine', () => {
     expect(await engine.getTasksAsync()).toHaveLength(0);
   });
 
+  it('emits onTaskComplete with the reported result', async () => {
+    const h = makeHarness();
+    const engine = new WebSchedulerEngine({ now: h.now, setTimer: h.setTimer, clearTimer: h.clearTimer });
+    const completed: { taskId: string; result: TaskResult }[] = [];
+    engine.addListener('onTaskComplete', (p) => completed.push({ taskId: p.taskId, result: p.result }));
+
+    await engine.registerTaskAsync({ id: 'a', triggers: [{ type: 'time', at: 1000 }] });
+    await engine.runTaskAsync('a');
+    await engine.reportResultAsync('a', TaskResult.NEW_DATA);
+    expect(completed).toEqual([{ taskId: 'a', result: TaskResult.NEW_DATA }]);
+  });
+
+  it('keeps a recurring task alive after its retries are exhausted', async () => {
+    const h = makeHarness();
+    const engine = new WebSchedulerEngine({ now: h.now, setTimer: h.setTimer, clearTimer: h.clearTimer });
+    const fired: TaskEventPayload[] = [];
+    engine.addListener('onTaskExecute', (p) => {
+      fired.push(p);
+      // Always fail; maxAttempts=1 means each occurrence immediately exhausts retries.
+      void engine.reportResultAsync(p.taskId, TaskResult.FAILED);
+    });
+
+    await engine.registerTaskAsync({
+      id: 'tick',
+      triggers: [{ type: 'recurrence', recurrence: { kind: 'interval', everyMs: 1000 } }],
+      policy: { retry: { maxAttempts: 1, backoffMs: 100 } },
+    });
+    h.advanceTo(3500);
+    // Without the fix the recurrence would be dropped after the first failure.
+    expect(fired.map((f) => f.taskId)).toEqual(['tick', 'tick', 'tick']);
+  });
+
+  it('honors a one-shot trigger alongside a recurrence after rescheduling', async () => {
+    const h = makeHarness();
+    const engine = new WebSchedulerEngine({ now: h.now, setTimer: h.setTimer, clearTimer: h.clearTimer });
+    const fired: number[] = [];
+    engine.addListener('onTaskExecute', (p) => fired.push(p.firedAt));
+
+    await engine.registerTaskAsync({
+      id: 'mix',
+      recurrence: { kind: 'interval', everyMs: 10_000 },
+      triggers: [
+        { type: 'recurrence', recurrence: { kind: 'interval', everyMs: 10_000 } },
+        { type: 'alarm', at: 3000 },
+      ],
+    });
+    h.advanceTo(12_000);
+    // alarm at 3000, then recurrence at 10000 (both honored after reschedule).
+    expect(fired).toContain(3000);
+    expect(fired).toContain(10_000);
+  });
+
   it('retries a failed task with backoff', async () => {
     const h = makeHarness();
     const engine = new WebSchedulerEngine({ now: h.now, setTimer: h.setTimer, clearTimer: h.clearTimer });

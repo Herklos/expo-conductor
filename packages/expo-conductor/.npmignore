@@ -1,0 +1,17 @@
+# Native test harnesses and build artifacts — never publish these.
+android/engine-jvm/
+ios/Tests/
+ios/Package.swift
+**/.gradle/
+**/.kotlin/
+**/build/
+!build/
+**/*.log
+
+# TS test sources
+src/__tests__/
+**/__tests__/
+
+# misc
+*.tsbuildinfo
+.DS_Store

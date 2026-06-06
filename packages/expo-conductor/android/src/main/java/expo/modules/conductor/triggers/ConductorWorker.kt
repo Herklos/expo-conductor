@@ -15,7 +15,9 @@ import expo.modules.conductor.storage.TaskStore
 class ConductorWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
   override fun doWork(): Result {
     val id = inputData.getString(KEY_ID) ?: return Result.failure()
-    val task = TaskStore(applicationContext).get(id) ?: return Result.success()
+    val store = TaskStore(applicationContext)
+    if (store.isPaused()) return Result.success() // conductor paused; skip without retrying
+    val task = store.get(id) ?: return Result.success()
     val module = ExpoConductorModule.INSTANCE
       ?: // No JS runtime: only native handlers can run. Re-enqueue for JS later.
       return if (task.optJSONObject("handler")?.optString("type") == "native") {

@@ -20,7 +20,6 @@ import {
   type Trigger,
 } from './ExpoConductor.types';
 import { evaluate } from './web/engine/policy';
-import { nextRun } from './web/engine/recurrence';
 import { TaskRegistry } from './web/engine/registry';
 import { admit, type WeightedTask } from './web/engine/weight';
 import { computeNextRunAt, normalize } from './web/normalize';
@@ -117,6 +116,13 @@ export class WebSchedulerEngine implements ConductorBackend {
   async reportResultAsync(id: string, result: TaskResult): Promise<void> {
     const task = this.registry.get(id);
     if (!task) return;
+    this.emit('onTaskComplete', {
+      taskId: id,
+      triggerType: task.triggers[0]?.type ?? 'time',
+      firedAt: this.now(),
+      attempt: this.attempts.get(id) ?? 1,
+      result,
+    });
     if (result === TaskResult.FAILED) {
       this.handleRetry(task);
     } else {
@@ -206,9 +212,9 @@ export class WebSchedulerEngine implements ConductorBackend {
   }
 
   private reschedule(task: RegisteredTask, now: number): void {
-    const next = task.recurrence
-      ? nextRun(task.recurrence, now)
-      : computeNextRunAt(futureTriggers(task.triggers, now), undefined, now);
+    // Consider both the recurrence and any still-future one-shot triggers so a
+    // task with e.g. a recurrence AND an alarm keeps honoring both.
+    const next = computeNextRunAt(futureTriggers(task.triggers, now), task.recurrence, now);
     const updated: RegisteredTask = { ...task, nextRunAt: next };
     this.registry.upsert(updated);
     this.scheduleTimer(updated);
@@ -218,7 +224,10 @@ export class WebSchedulerEngine implements ConductorBackend {
     const retry = task.policy.retry;
     const attempt = this.attempts.get(task.id) ?? 1;
     if (!retry || attempt >= retry.maxAttempts) {
+      // Retries exhausted (or none configured): drop the retry counter but keep
+      // the task's recurrence/one-shot schedule alive instead of dropping it.
       this.attempts.delete(task.id);
+      this.reschedule(task, this.now());
       return;
     }
     const backoff = Math.min(

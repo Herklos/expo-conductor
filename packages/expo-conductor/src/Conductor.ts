@@ -20,6 +20,8 @@ import {
 
 export class ConductorClient {
   private handlers = new Map<string, JsTaskHandler>();
+  /** Maps a task id to the name of the handler it should dispatch to. */
+  private taskHandlerNames = new Map<string, string>();
   private executeSub?: ConductorSubscription;
 
   constructor(private readonly backend: ConductorBackend) {}
@@ -40,6 +42,7 @@ export class ConductorClient {
 
   /** Register (or replace) a task definition with the engine. */
   async defineTaskDefinition(definition: TaskDefinition): Promise<RegisteredTask> {
+    this.taskHandlerNames.set(definition.id, definition.handler?.name ?? definition.id);
     return this.backend.registerTaskAsync(definition);
   }
 
@@ -49,10 +52,12 @@ export class ConductorClient {
     if (handler && (definition.handler?.type ?? 'js') === 'js') {
       this.defineTask(name, handler);
     }
+    this.taskHandlerNames.set(definition.id, name);
     return this.backend.registerTaskAsync(definition);
   }
 
   cancelTask(id: string): Promise<boolean> {
+    this.taskHandlerNames.delete(id);
     return this.backend.cancelTaskAsync(id);
   }
 
@@ -97,7 +102,10 @@ export class ConductorClient {
     attempt: number;
     data?: Record<string, unknown>;
   }): Promise<void> {
-    const handler = this.handlers.get(payload.taskId);
+    // Resolve the task id to its handler name (they differ when several tasks
+    // share one handler, e.g. dynamic ids). Falls back to the task id itself.
+    const handlerName = this.taskHandlerNames.get(payload.taskId) ?? payload.taskId;
+    const handler = this.handlers.get(handlerName);
     if (!handler) return; // native handler or no JS handler registered
     const ctx: TaskExecutionContext = {
       taskId: payload.taskId,

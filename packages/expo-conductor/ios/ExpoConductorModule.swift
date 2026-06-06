@@ -22,45 +22,49 @@ public class ExpoConductorModule: Module {
       ExpoConductorModule.shared = self
     }
 
-    AsyncFunction("registerTaskAsync") { (definition: [String: Any]) -> [String: Any] in
+    AsyncFunction("registerTaskAsync") { [weak self] (definition: [String: Any]) -> [String: Any] in
+      guard let self else { return definition }
       let task = TaskMapper.normalize(definition, now: self.nowMs())
       self.store.upsert(task)
       self.schedule(task)
       return task
     }
 
-    AsyncFunction("cancelTaskAsync") { (id: String) -> Bool in
+    AsyncFunction("cancelTaskAsync") { [weak self] (id: String) -> Bool in
+      guard let self else { return false }
       self.unschedule(id)
       return self.store.remove(id)
     }
 
-    AsyncFunction("getTasksAsync") { () -> [[String: Any]] in
-      self.store.all()
+    AsyncFunction("getTasksAsync") { [weak self] () -> [[String: Any]] in
+      self?.store.all() ?? []
     }
 
-    AsyncFunction("runTaskAsync") { (id: String) in
-      if let task = self.store.get(id) {
-        self.dispatch(task, manual: true)
-      }
+    AsyncFunction("runTaskAsync") { [weak self] (id: String) in
+      guard let self, let task = self.store.get(id) else { return }
+      self.dispatch(task, manual: true)
     }
 
-    AsyncFunction("setResourceBudgetAsync") { (budget: [String: Any]) in
-      self.budget = TaskMapper.weight(budget)
+    AsyncFunction("setResourceBudgetAsync") { [weak self] (budget: [String: Any]) in
+      self?.budget = TaskMapper.weight(budget)
     }
 
-    AsyncFunction("pauseAsync") {
+    AsyncFunction("pauseAsync") { [weak self] in
+      guard let self else { return }
       self.paused = true
       for task in self.store.all() {
         if let id = task["id"] as? String { self.unschedule(id) }
       }
     }
 
-    AsyncFunction("resumeAsync") {
+    AsyncFunction("resumeAsync") { [weak self] in
+      guard let self else { return }
       self.paused = false
       for task in self.store.all() { self.schedule(task) }
     }
 
-    AsyncFunction("reportResultAsync") { (id: String, result: String) in
+    AsyncFunction("reportResultAsync") { [weak self] (id: String, result: String) in
+      guard let self else { return }
       self.sendEvent("onTaskComplete", [
         "taskId": id, "result": result, "firedAt": self.nowMs(), "attempt": 1, "triggerType": "background",
       ])

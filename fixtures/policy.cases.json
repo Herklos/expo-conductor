@@ -66,6 +66,24 @@
       "constraints": { "requiresIdle": true },
       "context": { "now": 10, "batteryLevel": 1, "charging": true, "networkType": "unmetered", "idle": false },
       "expected": { "eligible": false, "reason": "REQUIRES_IDLE" }
+    },
+    {
+      "name": "battery exactly at minimum is eligible (>=)",
+      "constraints": { "minBatteryLevel": 0.2 },
+      "context": { "now": 10, "batteryLevel": 0.2, "charging": false, "networkType": "unmetered", "idle": true },
+      "expected": { "eligible": true, "reason": "ELIGIBLE" }
+    },
+    {
+      "name": "now exactly at window earliest is eligible",
+      "constraints": { "window": { "earliest": 100 } },
+      "context": { "now": 100, "batteryLevel": 1, "charging": true, "networkType": "unmetered", "idle": true },
+      "expected": { "eligible": true, "reason": "ELIGIBLE" }
+    },
+    {
+      "name": "now exactly at expiresAt is still eligible (strict >)",
+      "constraints": { "expiresAt": 1000 },
+      "context": { "now": 1000, "batteryLevel": 1, "charging": true, "networkType": "unmetered", "idle": true },
+      "expected": { "eligible": true, "reason": "ELIGIBLE" }
     }
   ]
 }

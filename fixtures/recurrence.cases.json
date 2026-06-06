@@ -102,6 +102,24 @@
       "spec": { "kind": "cron", "expression": "0 0 5" },
       "fromMs": 0,
       "expected": 86400000
+    },
+    {
+      "name": "cron: every 6 hours (*/step on hour field)",
+      "spec": { "kind": "cron", "expression": "0 */6 *" },
+      "fromMs": 0,
+      "expected": 21600000
+    },
+    {
+      "name": "weekly: on target weekday but past the time wraps a week",
+      "spec": { "kind": "weekly", "weekday": 4, "hour": 0, "minute": 0 },
+      "fromMs": 3600000,
+      "expected": 604800000
+    },
+    {
+      "name": "daily: from a large fromMs many days out",
+      "spec": { "kind": "daily", "hour": 0, "minute": 0 },
+      "fromMs": 8640000000,
+      "expected": 8726400000
     }
   ]
 }

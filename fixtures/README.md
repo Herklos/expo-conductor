@@ -7,8 +7,11 @@ implementation ships a test suite that loads these exact files and asserts ident
 results. This is how "the same behavior is tested on every platform" is guaranteed
 for a native-first module.
 
-All times are **UTC epoch milliseconds** and all math is integer math, so results
-are bit-for-bit identical across languages with no timezone database involved.
+All times are **UTC epoch milliseconds** and time math is integer math, so results
+are bit-for-bit identical across languages with no timezone database involved. Resource
+weights are IEEE-754 `double`s and **must be compared with a strict `<=`** — an
+epsilon-tolerant comparison would diverge across platforms (e.g. `0.1 + 0.1 + 0.1`
+is `0.30000000000000004` everywhere, so it consistently exceeds a `0.3` budget).
 
 | File | Engine concern | Function under test |
 | --- | --- | --- |

@@ -36,6 +36,11 @@ class TaskStore(context: Context) {
 
   fun clear() = prefs.edit().remove(KEY).apply()
 
+  /** Whether the conductor is paused. Persisted so it survives process death / reboot. */
+  fun isPaused(): Boolean = prefs.getBoolean(KEY_PAUSED, false)
+
+  fun setPaused(value: Boolean) = prefs.edit().putBoolean(KEY_PAUSED, value).apply()
+
   private fun persist(list: List<JSONObject>) {
     val array = JSONArray()
     list.forEach { array.put(it) }
@@ -45,5 +50,6 @@ class TaskStore(context: Context) {
   companion object {
     private const val PREFS = "expo.modules.conductor.tasks"
     private const val KEY = "tasks"
+    private const val KEY_PAUSED = "paused"
   }
 }

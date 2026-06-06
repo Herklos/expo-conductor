@@ -53,8 +53,10 @@ platform’s test suite (Jest, JUnit, XCTest) loads the *same* cases:
 | task weight / budget | `weight-admission.cases.json` | ✅ | ✅ | ✅ |
 | execution policy | `policy.cases.json` | ✅ | ✅ | ✅ |
 
-All engine math is integer math on UTC epoch milliseconds, so results are bit-for-bit
-identical across languages with no timezone database involved.
+Time math is integer math on UTC epoch milliseconds (no timezone database involved), and
+resource weights use IEEE-754 `double` compared with a strict `<=` — both are bit-for-bit
+identical across JVM, Swift and JS, so the three engines agree exactly. (Engines must
+compare weights exactly; an epsilon-tolerant `<= budget + 1e-9` would diverge.)
 
 ## Monorepo layout
 
@@ -118,10 +120,13 @@ A task fires when **any** of its triggers fire. Supported trigger types:
 
 ### Priority & resource weight
 
-When multiple tasks are due at once, the engine **orders by priority** (higher first,
-then earliest-due, then id) and **admits** them greedily against a `ResourceBudget`,
-deferring tasks that would exceed any dimension. This is how a heavy, low-priority task
-yields to lighter or more important ones.
+The engine **orders by priority** (higher first, then earliest-due, then id) and
+**admits** tasks greedily against a `ResourceBudget`, deferring (skip-over) any that would
+exceed a dimension — this is how a heavy, low-priority task yields to lighter or more
+important ones. The multi-task admission algorithm is verified by the shared fixtures on
+all platforms. At runtime each task is evaluated against the live budget when its trigger
+fires; deferred tasks emit `onTaskSkipped` with reason `DEFERRED_BY_BUDGET` and are
+rescheduled.
 
 ```ts
 Conductor.setResourceBudget({ cpu: 1, network: 1, battery: 1, memory: 1 });
@@ -186,7 +191,9 @@ native handler with the same name exists, the engine uses the native one.
 import Conductor from 'expo-conductor';
 
 Conductor.defineTask(name, handler)          // register a JS handler
+Conductor.undefineTask(name)                 // remove a JS handler
 await Conductor.schedule(def, handler?)      // register handler + task definition
+await Conductor.defineTaskDefinition(def)    // register a definition (handler registered separately)
 await Conductor.cancelTask(id)
 await Conductor.getTasks()
 await Conductor.runNow(id)                    // fire immediately, bypassing policy/budget
