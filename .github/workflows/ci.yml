@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+
+jobs:
+  js:
+    name: JS / TS (engine + API)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm --filter expo-conductor typecheck
+      - name: Test (Jest, shared fixtures + orchestration)
+        run: pnpm --filter expo-conductor test
+      - name: Build package
+        run: pnpm --filter expo-conductor build
+      - name: Typecheck demo
+        run: pnpm --filter demo typecheck
+
+  kotlin:
+    name: Kotlin engine (shared fixtures)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Run Kotlin engine tests
+        working-directory: packages/expo-conductor/android/engine-jvm
+        run: gradle test --console=plain --no-daemon
+
+  swift:
+    name: Swift engine (shared fixtures)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Swift engine tests
+        working-directory: packages/expo-conductor/ios
+        run: swift test
