@@ -4,6 +4,12 @@ import Conductor, {
   type RegisteredTask,
   type TaskDefinition,
 } from 'expo-conductor';
+
+import {
+  backgroundTaskStatus,
+  disableHeadlessBackground,
+  enableHeadlessBackground,
+} from './backgroundTask';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Pressable,
@@ -203,6 +209,23 @@ export default function App() {
               append(`cancelled ${all.length} task(s)`);
               await refresh();
             },
+          },
+        ],
+      },
+      {
+        title: '6 · Headless background (Phase 2 · optional deps)',
+        buttons: [
+          {
+            label: 'Enable headless tick',
+            onPress: async () => append(`headless: ${await enableHeadlessBackground(15)}`),
+          },
+          {
+            label: 'BG status',
+            onPress: async () => append(await backgroundTaskStatus()),
+          },
+          {
+            label: 'Disable headless tick',
+            onPress: async () => append(`headless: ${await disableHeadlessBackground()}`),
           },
         ],
       },
