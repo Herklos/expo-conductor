@@ -9,7 +9,8 @@
     "test:kotlin": "cd packages/expo-conductor/android/engine-jvm && gradle test --console=plain",
     "test:swift": "cd packages/expo-conductor/ios && swift test",
     "typecheck": "pnpm -r --if-present typecheck",
-    "demo": "pnpm --filter demo start"
+    "demo": "pnpm --filter demo start",
+    "publish:lib": "pnpm --filter expo-conductor publish:public"
   },
   "devDependencies": {
     "typescript": "~5.8.3"
