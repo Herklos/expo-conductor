@@ -104,7 +104,7 @@ A task fires when **any** of its triggers fire. Supported trigger types:
 | `notification` | NotificationManager | UNUserNotificationCenter | Notification API | user-visible |
 | `alarm` (exact) | AlarmManager (`setExactAndAllowWhileIdle`) | ⚠︎ notification fallback | `setTimeout` | exact wall-clock |
 | `background` (deferrable) | WorkManager | BGAppRefreshTask | Periodic Background Sync | OS-optimized |
-| `push` (FCM/APNs data message) | FirebaseMessagingService* | remote-notification | — | server-driven |
+| `push` (FCM/APNs data message) | FirebaseMessagingService* | APNs remote-notification | — | server-driven |
 | `appState` | lifecycle | lifecycle | visibility | fg/bg transitions |
 
 \* FCM requires `enableFcm: true` in the config plugin and a Firebase setup.
@@ -232,7 +232,7 @@ Conductor.addListener('onTaskError',    (p) => {})
 | Suite | Command | Runs where |
 | --- | --- | --- |
 | TS engine + orchestration + API (Jest) | `pnpm --filter expo-conductor test` | anywhere with Node |
-| Kotlin engine (JUnit, shared fixtures) | `pnpm test:kotlin` | any JDK 17+ |
+| Kotlin engine (JUnit, shared fixtures) | `pnpm test:kotlin` | JDK 17+ (CI uses 21) |
 | Swift engine (XCTest, shared fixtures) | `pnpm test:swift` | macOS / Swift toolchain |
 
 The Kotlin and Swift engine tests use standalone JVM-Gradle and SwiftPM harnesses, so

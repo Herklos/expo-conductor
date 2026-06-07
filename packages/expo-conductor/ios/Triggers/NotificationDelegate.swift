@@ -4,14 +4,19 @@ import UserNotifications
 /// Receives local-notification deliveries and dispatches the matching conductor task,
 /// so `notification` / `time` / `alarm` triggers actually run their handler on iOS.
 ///
-/// NOTE: this sets the shared `UNUserNotificationCenter` delegate. If the host app (or
-/// another library such as expo-notifications) also needs that delegate, install this
-/// before/after them deliberately, or forward deliveries to `handle(_:)`.
+/// To avoid clobbering another library's notification handling (e.g. expo-notifications),
+/// this captures any pre-existing `UNUserNotificationCenter` delegate and forwards
+/// notifications it does not own (those without a `conductorTask` userInfo key).
 final class ConductorNotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
   static let shared = ConductorNotificationDelegate()
+  private weak var previousDelegate: UNUserNotificationCenterDelegate?
 
   static func install() {
-    UNUserNotificationCenter.current().delegate = shared
+    let center = UNUserNotificationCenter.current()
+    if center.delegate !== shared {
+      shared.previousDelegate = center.delegate
+      center.delegate = shared
+    }
   }
 
   func userNotificationCenter(
@@ -19,8 +24,17 @@ final class ConductorNotificationDelegate: NSObject, UNUserNotificationCenterDel
     willPresent notification: UNNotification,
     withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
   ) {
-    handle(notification.request.content.userInfo)
-    completionHandler([.banner, .list, .sound])
+    let userInfo = notification.request.content.userInfo
+    if userInfo["conductorTask"] != nil {
+      handle(userInfo)
+      completionHandler([.banner, .list, .sound])
+      return
+    }
+    // Not ours — forward to the previous delegate, or default if it doesn't implement it.
+    let forwarded: Void? = previousDelegate?.userNotificationCenter?(
+      center, willPresent: notification, withCompletionHandler: completionHandler
+    )
+    if forwarded == nil { completionHandler([.banner, .list, .sound]) }
   }
 
   func userNotificationCenter(
@@ -28,14 +42,28 @@ final class ConductorNotificationDelegate: NSObject, UNUserNotificationCenterDel
     didReceive response: UNNotificationResponse,
     withCompletionHandler completionHandler: @escaping () -> Void
   ) {
-    handle(response.notification.request.content.userInfo)
-    completionHandler()
+    let userInfo = response.notification.request.content.userInfo
+    if userInfo["conductorTask"] != nil {
+      handle(userInfo)
+      completionHandler()
+      return
+    }
+    let forwarded: Void? = previousDelegate?.userNotificationCenter?(
+      center, didReceive: response, withCompletionHandler: completionHandler
+    )
+    if forwarded == nil { completionHandler() }
   }
 
   /// Dispatch the conductor task named by the notification's `conductorTask` userInfo key.
+  /// Falls back to a headless native dispatch when no live module/JS instance exists.
   func handle(_ userInfo: [AnyHashable: Any]) {
     guard let id = userInfo["conductorTask"] as? String,
           let task = TaskStore().get(id) else { return }
-    ExpoConductorModule.shared?.dispatch(task, manual: false)
+    let data = userInfo as? [String: Any] ?? [:]
+    if let module = ExpoConductorModule.shared {
+      module.dispatch(task, manual: false, data: data)
+    } else {
+      ExpoConductorModule.dispatchHeadless(task, data: data)
+    }
   }
 }

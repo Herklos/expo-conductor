@@ -94,11 +94,42 @@ public class ExpoConductorModule: Module {
   /// Run every task that is currently due (used by the BGTask launch handler).
   func runDueBackgroundTasks() {
     let now = nowMs()
-    for task in store.all() {
-      let due = (task["nextRunAt"] as? Int).map { $0 <= now } ?? false
-      let isBackground = (task["triggers"] as? [[String: Any]])?
-        .contains { ($0["type"] as? String) == "background" } ?? false
-      if due || isBackground { dispatch(task, manual: false) }
+    for task in store.all() where Self.isDue(task, now: now) {
+      dispatch(task, manual: false)
+    }
+  }
+
+  private static func isDue(_ task: [String: Any], now: Int) -> Bool {
+    let due = (task["nextRunAt"] as? Int).map { $0 <= now } ?? false
+    let isBackground = (task["triggers"] as? [[String: Any]])?
+      .contains { ($0["type"] as? String) == "background" } ?? false
+    return due || isBackground
+  }
+
+  /// Headless variants used when the app is woken into the background and no module/JS
+  /// instance exists yet. Only NATIVE handlers can run without JS; recurrence is advanced
+  /// and notifications re-scheduled for those. JS-handler tasks are left untouched so they
+  /// replay on the next foreground launch.
+  static func runDueBackgroundTasksHeadless() {
+    let store = TaskStore()
+    let now = Int(Date().timeIntervalSince1970 * 1000)
+    for task in store.all() where isDue(task, now: now) {
+      dispatchHeadless(task, data: [:])
+    }
+  }
+
+  static func dispatchHeadless(_ task: [String: Any], data: [String: Any]) {
+    guard let id = task["id"] as? String,
+          let handler = task["handler"] as? [String: Any],
+          (handler["type"] as? String) == "native" else { return }
+    let name = handler["name"] as? String ?? id
+    _ = ConductorHandlerRegistry.shared.handler(for: name)?(id, data)
+    if let recurrence = TaskMapper.parseRecurrence(task),
+       let next = RecurrenceEngine.nextRun(recurrence, Int(Date().timeIntervalSince1970 * 1000)) {
+      var updated = task
+      updated["nextRunAt"] = next
+      TaskStore().upsert(updated)
+      NotificationScheduler.schedule(id: id, fireAtMs: next, title: nil, body: nil)
     }
   }
 

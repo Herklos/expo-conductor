@@ -14,8 +14,45 @@ public class ConductorAppDelegate: ExpoAppDelegateSubscriber {
   ) -> Bool {
     ConductorNotificationDelegate.install()
     BackgroundScheduler.registerLaunchHandlers {
-      ExpoConductorModule.shared?.runDueBackgroundTasks()
+      // When woken into the background, the JS module may not exist yet; fall back to a
+      // headless path that still runs native handlers.
+      if let module = ExpoConductorModule.shared {
+        module.runDueBackgroundTasks()
+      } else {
+        ExpoConductorModule.runDueBackgroundTasksHeadless()
+      }
     }
     return true
+  }
+
+  /// APNs data-message path for `push` triggers (the iOS counterpart of Android's FCM
+  /// service). A remote notification carrying `conductorTask` dispatches the matching task.
+  public func application(
+    _ application: UIApplication,
+    didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+    fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+  ) {
+    guard let key = userInfo["conductorTask"] as? String else {
+      completionHandler(.noData)
+      return
+    }
+    let task = TaskStore().all().first { task in
+      if (task["id"] as? String) == key { return true }
+      let triggers = task["triggers"] as? [[String: Any]] ?? []
+      return triggers.contains {
+        ($0["type"] as? String) == "push" && ($0["matchKey"] as? String) == key
+      }
+    }
+    guard let task else {
+      completionHandler(.noData)
+      return
+    }
+    let data = userInfo as? [String: Any] ?? [:]
+    if let module = ExpoConductorModule.shared {
+      module.dispatch(task, manual: false, data: data)
+    } else {
+      ExpoConductorModule.dispatchHeadless(task, data: data)
+    }
+    completionHandler(.newData)
   }
 }

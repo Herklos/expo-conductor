@@ -101,7 +101,10 @@ class ExpoConductorModule : Module() {
     }
 
     AsyncFunction("reportResultAsync") { id: String, result: String, error: String? ->
-      // Result feeds retry/backoff; WorkManager handles its own retry via Result.retry().
+      // Emits lifecycle events. NOTE: a JS-handler FAILED result is NOT retried by the OS
+      // here — the Worker has already returned success by the time JS reports — so OS-level
+      // retry/backoff applies to native handlers only; JS retry is handled in-process by
+      // the JS engine while the app is alive.
       if (error != null) {
         emit("onTaskError", mapOf(
           "taskId" to id, "error" to error, "firedAt" to System.currentTimeMillis(),
@@ -205,7 +208,8 @@ class ExpoConductorModule : Module() {
       emitComplete(id, result)
     }
 
-    advanceRecurrence(task)
+    // A manual run-now must not advance the task's real schedule (matches the TS engine).
+    if (!manual) advanceRecurrence(task)
   }
 
   private fun advanceRecurrence(task: JSONObject) {
@@ -265,9 +269,11 @@ class ExpoConductorModule : Module() {
     internal fun dispatchHeadless(context: Context, task: JSONObject, data: Map<String, Any?>) {
       if (TaskStore(context).isPaused()) return
       val handler = task.optJSONObject("handler")
-      if (handler?.optString("type") == "native") {
-        nativeHandlers[handler.optString("name")]?.run(task.optString("id"), data)
-      }
+      // Only native handlers can run without JS. For a JS handler we must NOT advance the
+      // recurrence or re-arm the alarm, otherwise this occurrence is lost — leave the
+      // (already-past) nextRunAt so it replays once a JS runtime exists on next launch.
+      if (handler?.optString("type") != "native") return
+      nativeHandlers[handler.optString("name")]?.run(task.optString("id"), data)
       val recurrence = TaskMapper.recurrence(task) ?: return
       val next = RecurrenceEngine.nextRun(recurrence, System.currentTimeMillis()) ?: return
       task.put("nextRunAt", next)
