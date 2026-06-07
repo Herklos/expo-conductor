@@ -184,6 +184,26 @@ describe('WebSchedulerEngine', () => {
     expect(attempts).toEqual([1, 1, 1]);
   });
 
+  it('a failed manual run does not arm a retry timer or perturb the schedule', async () => {
+    const h = makeHarness();
+    const engine = new WebSchedulerEngine({ now: h.now, setTimer: h.setTimer, clearTimer: h.clearTimer });
+    const fired: number[] = [];
+    engine.addListener('onTaskExecute', (p) => fired.push(p.firedAt));
+
+    await engine.registerTaskAsync({
+      id: 'a',
+      triggers: [{ type: 'time', at: 10_000 }],
+      policy: { retry: { maxAttempts: 3, backoffMs: 500 } },
+    });
+    await engine.runTaskAsync('a'); // manual fire at t=0
+    await engine.reportResultAsync('a', TaskResult.FAILED); // manual failure must NOT schedule a retry
+
+    h.advanceTo(2000); // a backoff retry (if wrongly armed) would fire around t=500
+    expect(fired.map(() => 'manual-only')).toEqual(['manual-only']); // only the manual run so far
+    h.advanceTo(10_000); // the real scheduled fire still happens on time
+    expect(fired).toEqual([0, 10_000]);
+  });
+
   it('getStatusAsync reports available on web', async () => {
     const h = makeHarness();
     const engine = new WebSchedulerEngine({ now: h.now, setTimer: h.setTimer, clearTimer: h.clearTimer });

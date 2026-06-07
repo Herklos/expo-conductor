@@ -241,6 +241,9 @@ export class WebSchedulerEngine implements ConductorBackend {
 
   private handleRetry(task: RegisteredTask): void {
     const retry = task.policy.retry;
+    // Only scheduled fires populate `attempts`; a manual runNow does not. Skip retry
+    // for a manual fire so it can't clobber the real schedule with a backoff timer.
+    if (!this.attempts.has(task.id)) return;
     const attempt = this.attempts.get(task.id) ?? 1;
     if (!retry || attempt >= retry.maxAttempts) {
       // Retries exhausted (or none configured): drop the retry counter but keep

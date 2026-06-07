@@ -1,11 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-  <!-- Permissions required by the conductor triggers. The config plugin adds these
-       to the host app's manifest; they are declared here for the library too. -->
+  <!-- Baseline permissions for the conductor triggers. Exact-alarm permissions are
+       intentionally NOT declared here: SCHEDULE_EXACT_ALARM / USE_EXACT_ALARM (the latter
+       Play-restricted) are added conditionally by the config plugin when
+       `enableExactAlarms` is set, so apps that don't use exact alarms don't ship them. -->
   <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
   <uses-permission android:name="android.permission.WAKE_LOCK" />
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-  <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-  <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
   <application>
     <!-- Exact-alarm trigger receiver. -->
