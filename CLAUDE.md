@@ -98,6 +98,17 @@ builds need the Android SDK / Xcode (not required for engine verification).
 - **Web `setTimeout` cap**: delays over ~24.8 days (2^31 ms) overflow, so `scheduleTimer`
   chains timers in <=MAX_TIMER_DELAY hops; the web engine also re-arms persisted tasks in
   its constructor (persistence would otherwise be write-only).
+- **Web-only orchestration (NOT fixture-validated)**: `policy.singleFlight` (leader
+  election, `web/engine/leader.ts`) and the `appState` trigger firing (`web/engine/appState.ts`)
+  live only in the Web engine. They are NOT part of the shared engine math (recurrence/
+  priority/weight/policy) the three platforms mirror, so they have **no Kotlin/Swift port
+  and no `/fixtures` case** — the "change all three engines" rule does not apply. Native is
+  a single app instance (always the leader) and gets app-state from its own host lifecycle;
+  it simply ignores the extra `singleFlight` policy key (`TaskMapper` reads policy by known
+  keys). Both are injectable on `WebSchedulerEngine` (`leaderElection` / `appStateSource`)
+  and unit-tested directly — no DOM/`navigator.locks` needed under Jest (Node defaults are
+  a no-op source + always-leader). Call `engine.dispose()` for transient engines so the
+  DOM listener + Web Locks don't leak.
 - **Headless limits + the optional interop**: by default a JS handler can't run after the
   app is terminated (in-memory registry); native handlers (`type: 'native'`) run headless.
   Phase 2 adds an OPT-IN bridge — `src/integrations/expoBackgroundTask.ts` (shipped as the

@@ -166,6 +166,22 @@ export interface ExecutionPolicy {
    * Web engine and within a live native process; see the README for headless caveats.
    */
   maxConcurrent?: number;
+  /**
+   * Cross-instance single-flight (leader election). When set, only ONE app instance
+   * sharing the resolved key fires this task; other instances defer their occurrence,
+   * emitting `onTaskSkipped` with reason `DEFERRED_BY_LEADER`. The deferred instance
+   * catches up automatically when it becomes the leader (e.g. the holder's tab closes).
+   *
+   * - `true` keys the lock on the task `id` (one leader per task).
+   * - a `string` keys the lock on that value, so several tasks can share one leader.
+   *
+   * Web: acquires `navigator.locks.request(key)` — the browser releases the lock when the
+   * holding tab closes/navigates, handing leadership to a waiting instance with no
+   * heartbeat. Native engines run a single app instance, so this is a no-op (always the
+   * holder). Intended for recurring / `appState` work; a one-shot `time`/`alarm` that
+   * fires while this instance is a non-leader is skipped and not replayed on handoff.
+   */
+  singleFlight?: boolean | string;
 }
 
 // ---------------------------------------------------------------------------
@@ -283,7 +299,7 @@ export interface TaskResultEventPayload extends TaskEventPayload {
 
 export interface TaskSkippedEventPayload {
   taskId: string;
-  reason: PolicyReason | 'DEFERRED_BY_BUDGET';
+  reason: PolicyReason | 'DEFERRED_BY_BUDGET' | 'DEFERRED_BY_LEADER';
 }
 
 export interface TaskErrorEventPayload extends TaskEventPayload {

@@ -20,7 +20,18 @@ import {
   type TaskDefinition,
   TaskResult,
   type Trigger,
+  type TriggerType,
 } from './ExpoConductor.types';
+import {
+  type AppStateSource,
+  type AppStateTransition,
+  defaultAppStateSource,
+} from './web/engine/appState';
+import {
+  defaultLeaderElection,
+  type LeaderElection,
+  type LeaderHandle,
+} from './web/engine/leader';
 import { evaluate } from './web/engine/policy';
 import { TaskRegistry } from './web/engine/registry';
 import { admit, type WeightedTask } from './web/engine/weight';
@@ -53,6 +64,12 @@ export interface WebSchedulerOptions {
   clearTimer?: (handle: unknown) => void;
   /** Delay before retrying a task deferred by the resource budget (default 60s). */
   deferRetryMs?: number;
+  /** Cross-instance leader election backing `policy.singleFlight` (default: Web Locks when
+   *  available, else always-leader). Injectable for deterministic tests. */
+  leaderElection?: LeaderElection;
+  /** Source of foreground/background transitions driving the `appState` trigger (default:
+   *  `visibilitychange` + window focus/blur; a no-op under Node/SSR). */
+  appStateSource?: AppStateSource;
 }
 
 export class WebSchedulerEngine implements ConductorBackend {
@@ -75,6 +92,13 @@ export class WebSchedulerEngine implements ConductorBackend {
   private readonly clearTimer: (handle: unknown) => void;
   private readonly deviceContext: () => Omit<DeviceContext, 'now'>;
   private readonly deferRetryMs: number;
+  private readonly leaderElection: LeaderElection;
+  private readonly appStateUnsub: () => void;
+  /** Per-task single-flight leadership claim (id -> {handle, key}); see `policy.singleFlight`. */
+  private readonly leaderClaims = new Map<string, { handle: LeaderHandle; key: string }>();
+  /** Tasks whose current occurrence this instance skipped for not being the leader; fired
+   *  as a catch-up once leadership is gained (see onLeadershipGain). */
+  private readonly deferredByLeader = new Set<string>();
 
   constructor(options: WebSchedulerOptions = {}) {
     this.now = options.now ?? (() => Date.now());
@@ -84,12 +108,20 @@ export class WebSchedulerEngine implements ConductorBackend {
       options.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
     this.deviceContext = options.deviceContext ?? (() => DEFAULT_CONTEXT);
     this.deferRetryMs = options.deferRetryMs ?? 60_000;
-    // Re-arm timers for tasks restored from persistence (otherwise web persistence is
-    // write-only — tasks survive reload but never fire). A task whose nextRunAt is already
-    // past will fire on the next tick (catch-up).
+    this.leaderElection = options.leaderElection ?? defaultLeaderElection();
+    // Re-arm timers (and re-claim single-flight leadership) for tasks restored from
+    // persistence — otherwise web persistence is write-only (tasks survive reload but never
+    // fire). A task whose nextRunAt is already past fires on the next tick (catch-up).
     if (!this.paused) {
-      for (const task of this.registry.all()) this.scheduleTimer(task);
+      for (const task of this.registry.all()) {
+        this.scheduleTimer(task);
+        this.acquireLeaderIfNeeded(task);
+      }
     }
+    // Drive `appState` triggers from foreground/background transitions.
+    this.appStateUnsub = (options.appStateSource ?? defaultAppStateSource()).subscribe((state) =>
+      this.onAppState(state),
+    );
   }
 
   // --- ConductorBackend ----------------------------------------------------
@@ -98,13 +130,16 @@ export class WebSchedulerEngine implements ConductorBackend {
     const task = normalize(definition, this.now());
     this.registry.upsert(task);
     this.scheduleTimer(task);
+    this.acquireLeaderIfNeeded(task);
     return task;
   }
 
   async cancelTaskAsync(id: string): Promise<boolean> {
     this.clearTimerFor(id);
+    this.releaseLeader(id);
     this.attempts.delete(id);
     this.running.delete(id);
+    this.deferredByLeader.delete(id);
     return this.registry.remove(id);
   }
 
@@ -142,11 +177,26 @@ export class WebSchedulerEngine implements ConductorBackend {
   async pauseAsync(): Promise<void> {
     this.paused = true;
     for (const id of [...this.timers.keys()]) this.clearTimerFor(id);
+    // Drop leadership while paused so a non-paused instance can take over the work.
+    for (const id of [...this.leaderClaims.keys()]) this.releaseLeader(id);
   }
 
   async resumeAsync(): Promise<void> {
     this.paused = false;
-    for (const task of this.registry.all()) this.scheduleTimer(task);
+    for (const task of this.registry.all()) {
+      this.scheduleTimer(task);
+      this.acquireLeaderIfNeeded(task);
+    }
+  }
+
+  /** Tear down the engine's listeners and in-flight state (timers, single-flight locks,
+   *  the appState subscription). The web module holds a long-lived singleton, so this is
+   *  mainly for tests / embedders that spin up transient engines and must not leak DOM
+   *  listeners or Web Locks. */
+  dispose(): void {
+    for (const id of [...this.timers.keys()]) this.clearTimerFor(id);
+    for (const id of [...this.leaderClaims.keys()]) this.releaseLeader(id);
+    this.appStateUnsub();
   }
 
   async getStatusAsync(): Promise<ConductorStatus> {
@@ -238,12 +288,23 @@ export class WebSchedulerEngine implements ConductorBackend {
     }
   }
 
-  /** Fire a task: enforce policy + budget, then emit execute, then reschedule. */
-  private fire(task: RegisteredTask, manual: boolean): void {
+  /** Fire a task: enforce single-flight + policy + budget, then emit execute, then
+   *  reschedule. `firedBy` overrides the reported trigger type (e.g. an `appState` fire of
+   *  a task whose first trigger is a recurrence). */
+  private fire(task: RegisteredTask, manual: boolean, firedBy?: TriggerType): void {
     const now = this.now();
     const ctx: DeviceContext = { ...this.deviceContext(), now };
 
     if (!manual) {
+      // Single-flight: only the elected leader acts. A non-leader defers this occurrence
+      // and catches up if/when it later becomes the leader (see onLeadershipGain).
+      if (!this.isLeaderFor(task)) {
+        this.emit('onTaskSkipped', { taskId: task.id, reason: 'DEFERRED_BY_LEADER' });
+        this.deferredByLeader.add(task.id);
+        this.reschedule(task, now);
+        return;
+      }
+
       const decision = evaluate(task.policy.constraints ?? {}, ctx);
       if (!decision.eligible) {
         this.emit('onTaskSkipped', { taskId: task.id, reason: decision.reason });
@@ -268,6 +329,8 @@ export class WebSchedulerEngine implements ConductorBackend {
         this.deferRetry(task, now);
         return;
       }
+      // Admitted as the leader — this occurrence is handled, so drop any deferred marker.
+      this.deferredByLeader.delete(task.id);
       // Mark running until the handler reports a result (drives cross-task budgeting).
       this.running.set(task.id, task.weight);
     }
@@ -287,7 +350,7 @@ export class WebSchedulerEngine implements ConductorBackend {
         })();
     this.emit('onTaskExecute', {
       taskId: task.id,
-      triggerType: task.triggers[0]?.type ?? 'time',
+      triggerType: firedBy ?? task.triggers[0]?.type ?? 'time',
       firedAt: now,
       attempt,
     });
@@ -345,6 +408,79 @@ export class WebSchedulerEngine implements ConductorBackend {
     this.registry.upsert(updated);
     this.scheduleTimer(updated);
   }
+
+  // --- single-flight (leader election) -------------------------------------
+
+  /** Claim (or refresh) single-flight leadership for a task that opted in. Ref-counted by
+   *  key inside the election, so tasks sharing a key share one underlying lock. A no-op
+   *  while paused or when the task didn't set `policy.singleFlight`. */
+  private acquireLeaderIfNeeded(task: RegisteredTask): void {
+    if (this.paused) return;
+    const key = leaderKeyOf(task);
+    const claim = this.leaderClaims.get(task.id);
+    if (claim) {
+      if (claim.key === key) return; // unchanged — keep the lock we already hold
+      claim.handle.release(); // key changed on re-register → drop the stale claim
+      this.leaderClaims.delete(task.id);
+    }
+    if (key == null) return;
+    const handle = this.leaderElection.acquire(key, (leader) => {
+      if (leader) this.onLeadershipGain(key);
+    });
+    this.leaderClaims.set(task.id, { handle, key });
+  }
+
+  private releaseLeader(id: string): void {
+    const claim = this.leaderClaims.get(id);
+    if (!claim) return;
+    claim.handle.release();
+    this.leaderClaims.delete(id);
+  }
+
+  /** Whether this instance may fire `task` now: always true unless it opted into
+   *  single-flight, in which case only the current lock holder may. A task with no live
+   *  claim (e.g. while paused) is not blocked. */
+  private isLeaderFor(task: RegisteredTask): boolean {
+    if (leaderKeyOf(task) == null) return true;
+    const claim = this.leaderClaims.get(task.id);
+    return claim ? claim.handle.isLeader() : true;
+  }
+
+  /** On gaining leadership for `key`, catch up every task under that key that this instance
+   *  deferred while a non-leader, or that has since come due. Tasks still on their normal
+   *  schedule aren't fired, so the initial (uncontended) grant fires nothing early. */
+  private onLeadershipGain(key: string): void {
+    if (this.paused) return;
+    const now = this.now();
+    for (const task of this.registry.all()) {
+      if (leaderKeyOf(task) !== key) continue;
+      const due = task.nextRunAt != null && task.nextRunAt <= now;
+      if (this.deferredByLeader.has(task.id) || due) {
+        this.deferredByLeader.delete(task.id);
+        this.fire(task, false);
+      }
+    }
+  }
+
+  // --- app-state triggers --------------------------------------------------
+
+  /** Fire every task with an `appState` trigger matching this foreground/background
+   *  transition (subject to the same single-flight + policy + budget gating). */
+  private onAppState(state: AppStateTransition): void {
+    if (this.paused) return;
+    for (const task of this.registry.all()) {
+      if (task.triggers.some((t) => t.type === 'appState' && t.on === state)) {
+        this.fire(task, false, 'appState');
+      }
+    }
+  }
+}
+
+/** Resolve a task's single-flight leader key, or null when it didn't opt in. */
+function leaderKeyOf(task: RegisteredTask): string | null {
+  const sf = task.policy.singleFlight;
+  if (!sf) return null;
+  return sf === true ? task.id : sf;
 }
 
 /** Keep only one-shot triggers whose time is still in the future. */

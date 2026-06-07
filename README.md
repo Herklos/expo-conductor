@@ -109,6 +109,11 @@ A task fires when **any** of its triggers fire. Supported trigger types:
 
 \* FCM requires `enableFcm: true` in the config plugin and a Firebase setup.
 
+On **web**, `appState` triggers fire from `visibilitychange` (supplemented by window
+focus/blur): a task with `{ type: 'appState', on: 'foreground' }` fires when the tab
+becomes visible, `on: 'background'` when it is hidden. Overlapping focus/visibility events
+are de-duplicated to a single transition.
+
 ### Recurrence
 
 ```ts
@@ -161,11 +166,39 @@ policy: {
   },
   retry: { maxAttempts: 3, backoffMs: 30000, maxBackoffMs: 600000 },
   maxConcurrent: 2,
+  singleFlight: true,                          // cross-instance leader election (see below)
 }
 ```
 
 If a constraint isn’t met when a task fires, it is **skipped** (with a reason emitted on
 `onTaskSkipped`) and rescheduled for its next occurrence.
+
+### Single-flight (cross-instance leader election)
+
+When several app instances of the same origin run the same task — two browser tabs, or a
+tab plus an Electron shell sharing one account — a recurring or `appState` task would fire
+in *each*, double-posting a webhook or double-replying to a command. `policy.singleFlight`
+elects **one leader**; only the holder fires, the others defer:
+
+```ts
+await Conductor.schedule({
+  id: 'poll-feed',
+  triggers: [{ type: 'recurrence', recurrence: { kind: 'interval', everyMs: 900000 } }],
+  policy: { singleFlight: true },        // `true` keys on the task id…
+  // policy: { singleFlight: 'feeds' },  // …a string shares one leader across tasks
+});
+```
+
+- **Web** acquires `navigator.locks.request(key)` (exclusive). The browser frees the lock
+  when the holding tab closes or navigates, so leadership hands off to a waiting instance
+  with **no heartbeat**. A non-leader’s occurrence emits `onTaskSkipped` with reason
+  `DEFERRED_BY_LEADER`; when that instance later becomes leader it fires the deferred
+  occurrence immediately (no full-interval wait).
+- **Native** runs a single app instance, so this is a no-op (always the holder).
+- `runNow(id)` always fires, regardless of leadership.
+
+Intended for recurring / `appState` work. A one-shot `time`/`alarm` that fires while this
+instance is a non-leader is skipped and **not** replayed on handoff.
 
 ### Task handlers — JS *or* native
 
