@@ -25,7 +25,9 @@
     "build:plugin": "tsc -p plugin/tsconfig.json",
     "clean": "rm -rf build plugin/build",
     "test": "jest",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p plugin/tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p plugin/tsconfig.json --noEmit",
+    "prepublishOnly": "pnpm run clean && pnpm run typecheck && pnpm run test && pnpm run build",
+    "publish:public": "pnpm publish --access public"
   },
   "keywords": [
     "expo",
