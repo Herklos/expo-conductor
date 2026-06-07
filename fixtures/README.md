@@ -18,7 +18,7 @@ is `0.30000000000000004` everywhere, so it consistently exceeds a `0.3` budget).
 | `recurrence.cases.json` | schedule / recurrence | `Recurrence.nextRun(spec, fromMs) -> Long?` |
 | `priority.cases.json` | priority vs other tasks | `Priority.order(tasks) -> id[]` |
 | `weight-admission.cases.json` | task weight / resource budget | `Weight.admit(budget, tasks) -> {admitted, deferred}` |
-| `policy.cases.json` | execution policy / constraints | `Policy.evaluate(task, context) -> Decision` |
+| `policy.cases.json` | execution policy / constraints | `Policy.evaluate(constraints, context) -> {eligible, reason}` |
 
 ## Conventions
 

@@ -9,8 +9,7 @@
     "build:plugin": "tsc -p plugin/tsconfig.json",
     "clean": "rm -rf build plugin/build",
     "test": "jest",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p plugin/tsconfig.json --noEmit",
-    "lint": "eslint \"src/**/*.{ts,tsx}\""
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p plugin/tsconfig.json --noEmit"
   },
   "keywords": [
     "expo",

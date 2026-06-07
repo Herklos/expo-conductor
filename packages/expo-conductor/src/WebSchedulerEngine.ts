@@ -11,6 +11,7 @@ import type {
   ConductorSubscription,
 } from './ConductorBackend';
 import {
+  type ConductorStatus,
   type DeviceContext,
   type ExpoConductorModuleEvents,
   type RegisteredTask,
@@ -105,7 +106,7 @@ export class WebSchedulerEngine implements ConductorBackend {
 
   async pauseAsync(): Promise<void> {
     this.paused = true;
-    for (const id of this.timers.keys()) this.clearTimerFor(id);
+    for (const id of [...this.timers.keys()]) this.clearTimerFor(id);
   }
 
   async resumeAsync(): Promise<void> {
@@ -113,14 +114,25 @@ export class WebSchedulerEngine implements ConductorBackend {
     for (const task of this.registry.all()) this.scheduleTimer(task);
   }
 
-  async reportResultAsync(id: string, result: TaskResult): Promise<void> {
+  async getStatusAsync(): Promise<ConductorStatus> {
+    // On web, timer-based scheduling works while the page is alive; true background
+    // execution depends on Periodic Background Sync, which we don't require here.
+    return 'available';
+  }
+
+  async reportResultAsync(id: string, result: TaskResult, error?: string): Promise<void> {
     const task = this.registry.get(id);
     if (!task) return;
+    const triggerType = task.triggers[0]?.type ?? 'time';
+    const attempt = this.attempts.get(id) ?? 1;
+    if (error != null) {
+      this.emit('onTaskError', { taskId: id, triggerType, firedAt: this.now(), attempt, error });
+    }
     this.emit('onTaskComplete', {
       taskId: id,
-      triggerType: task.triggers[0]?.type ?? 'time',
+      triggerType,
       firedAt: this.now(),
-      attempt: this.attempts.get(id) ?? 1,
+      attempt,
       result,
     });
     if (result === TaskResult.FAILED) {
@@ -201,8 +213,15 @@ export class WebSchedulerEngine implements ConductorBackend {
     // failure synchronously the retry timer is not clobbered by rescheduling.
     if (!manual) this.reschedule(task, now);
 
-    const attempt = (this.attempts.get(task.id) ?? 0) + 1;
-    this.attempts.set(task.id, attempt);
+    // A manual run must not perturb the retry/backoff attempt counter that the
+    // scheduled path owns.
+    const attempt = manual
+      ? (this.attempts.get(task.id) ?? 0) + 1
+      : (() => {
+          const next = (this.attempts.get(task.id) ?? 0) + 1;
+          this.attempts.set(task.id, next);
+          return next;
+        })();
     this.emit('onTaskExecute', {
       taskId: task.id,
       triggerType: task.triggers[0]?.type ?? 'time',

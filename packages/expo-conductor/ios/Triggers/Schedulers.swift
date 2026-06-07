@@ -25,11 +25,30 @@ enum NotificationScheduler {
   }
 }
 
-/// Schedules OS background app-refresh tasks via BGTaskScheduler. The host app must
-/// register the identifier in Info.plist (the config plugin does this) and call
-/// `registerLaunchHandlers()` at launch.
+/// Schedules OS background app-refresh tasks via BGTaskScheduler. The identifier must be
+/// listed in Info.plist `BGTaskSchedulerPermittedIdentifiers` (the config plugin does
+/// this) and `registerLaunchHandlers(_:)` must run during app launch (done by
+/// `ConductorAppDelegate`).
 enum BackgroundScheduler {
   static let refreshIdentifier = "com.expoconductor.refresh"
+  private static var registered = false
+
+  /// Register the BGTask launch handler. Must be called before the app finishes
+  /// launching (BGTaskScheduler requirement). The handler runs `onLaunch`, completes the
+  /// task, and re-submits the next request (BGTasks are one-shot).
+  static func registerLaunchHandlers(_ onLaunch: @escaping () -> Void) {
+    #if canImport(BackgroundTasks)
+    guard !registered else { return }
+    registered = true
+    BGTaskScheduler.shared.register(forTaskWithIdentifier: refreshIdentifier, using: nil) { task in
+      // Re-arm before doing work so the cadence continues even if work is cut short.
+      scheduleRefresh(earliestMs: nil)
+      task.expirationHandler = { task.setTaskCompleted(success: false) }
+      onLaunch()
+      task.setTaskCompleted(success: true)
+    }
+    #endif
+  }
 
   static func scheduleRefresh(earliestMs: Int?) {
     #if canImport(BackgroundTasks)
@@ -37,7 +56,13 @@ enum BackgroundScheduler {
     if let earliestMs = earliestMs {
       request.earliestBeginDate = Date(timeIntervalSince1970: Double(earliestMs) / 1000.0)
     }
-    try? BGTaskScheduler.shared.submit(request)
+    do {
+      try BGTaskScheduler.shared.submit(request)
+    } catch {
+      // Surface instead of swallowing: usually a missing Info.plist identifier or
+      // Background App Refresh being disabled.
+      NSLog("[expo-conductor] BGTaskScheduler.submit failed: \(error.localizedDescription)")
+    }
     #endif
   }
 }

@@ -156,6 +156,40 @@ describe('WebSchedulerEngine', () => {
     expect(completed).toEqual([{ taskId: 'a', result: TaskResult.NEW_DATA }]);
   });
 
+  it('emits onTaskError when a result is reported with an error', async () => {
+    const h = makeHarness();
+    const engine = new WebSchedulerEngine({ now: h.now, setTimer: h.setTimer, clearTimer: h.clearTimer });
+    const errors: { taskId: string; error: string }[] = [];
+    engine.addListener('onTaskError', (p) => errors.push({ taskId: p.taskId, error: p.error }));
+
+    await engine.registerTaskAsync({ id: 'a', triggers: [{ type: 'time', at: 1000 }] });
+    await engine.reportResultAsync('a', TaskResult.FAILED, 'boom');
+    expect(errors).toEqual([{ taskId: 'a', error: 'boom' }]);
+  });
+
+  it('manual runNow does not perturb the retry attempt counter', async () => {
+    const h = makeHarness();
+    const engine = new WebSchedulerEngine({ now: h.now, setTimer: h.setTimer, clearTimer: h.clearTimer });
+    const attempts: number[] = [];
+    engine.addListener('onTaskExecute', (p) => attempts.push(p.attempt));
+
+    await engine.registerTaskAsync({
+      id: 'a',
+      triggers: [{ type: 'time', at: 1000 }],
+      policy: { retry: { maxAttempts: 3, backoffMs: 500 } },
+    });
+    await engine.runTaskAsync('a'); // manual
+    await engine.runTaskAsync('a'); // manual again — must still report attempt 1
+    h.advanceTo(1000); // scheduled fire — should be attempt 1, not inflated by the manual runs
+    expect(attempts).toEqual([1, 1, 1]);
+  });
+
+  it('getStatusAsync reports available on web', async () => {
+    const h = makeHarness();
+    const engine = new WebSchedulerEngine({ now: h.now, setTimer: h.setTimer, clearTimer: h.clearTimer });
+    expect(await engine.getStatusAsync()).toBe('available');
+  });
+
   it('keeps a recurring task alive after its retries are exhausted', async () => {
     const h = makeHarness();
     const engine = new WebSchedulerEngine({ now: h.now, setTimer: h.setTimer, clearTimer: h.clearTimer });

@@ -1,7 +1,8 @@
 {
   "platforms": ["apple", "android", "web"],
   "apple": {
-    "modules": ["ExpoConductorModule"]
+    "modules": ["ExpoConductorModule"],
+    "appDelegateSubscribers": ["ConductorAppDelegate"]
   },
   "android": {
     "modules": ["expo.modules.conductor.ExpoConductorModule"]

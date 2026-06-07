@@ -89,8 +89,25 @@ class ExpoConductorModule : Module() {
       store.all().forEach { schedule(it) }
     }
 
-    AsyncFunction("reportResultAsync") { id: String, result: String ->
+    AsyncFunction("getStatusAsync") {
+      // WorkManager-backed background work is generally available; report "restricted"
+      // when the OS has put the app under background restrictions (API 28+).
+      val am = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && am.isBackgroundRestricted) {
+        "restricted"
+      } else {
+        "available"
+      }
+    }
+
+    AsyncFunction("reportResultAsync") { id: String, result: String, error: String? ->
       // Result feeds retry/backoff; WorkManager handles its own retry via Result.retry().
+      if (error != null) {
+        emit("onTaskError", mapOf(
+          "taskId" to id, "error" to error, "firedAt" to System.currentTimeMillis(),
+          "attempt" to 1, "triggerType" to "background",
+        ))
+      }
       emitComplete(id, result)
     }
   }
@@ -196,6 +213,10 @@ class ExpoConductorModule : Module() {
     val next = RecurrenceEngine.nextRun(recurrence, System.currentTimeMillis()) ?: return
     task.put("nextRunAt", next)
     store.upsert(task)
+    // Exact alarms do not self-repeat (unlike periodic WorkManager) — re-arm the next one.
+    if (TaskMapper.hasAlarmTrigger(task)) {
+      ConductorAlarmReceiver.schedule(context, task.optString("id"), next, TaskMapper.allowWhileIdle(task))
+    }
   }
 
   private fun deviceContext() = DeviceInfo.read(context, System.currentTimeMillis())
@@ -213,7 +234,8 @@ class ExpoConductorModule : Module() {
     var INSTANCE: ExpoConductorModule? = null
       private set
 
-    private val nativeHandlers = HashMap<String, ConductorTaskHandler>()
+    // Mutated by register/unregister (any thread) and read on Worker/alarm/FCM threads.
+    private val nativeHandlers = java.util.concurrent.ConcurrentHashMap<String, ConductorTaskHandler>()
 
     @Volatile
     private var paused = false
@@ -233,5 +255,26 @@ class ExpoConductorModule : Module() {
     }
 
     internal fun handlerFor(name: String): ConductorTaskHandler? = nativeHandlers[name]
+
+    /**
+     * Run a task when no live module/JS instance exists (process alive but module torn
+     * down). Native handlers still run; recurrence/alarm are advanced/re-armed. JS-only
+     * handlers cannot run here and are left for the next app launch.
+     */
+    @JvmStatic
+    internal fun dispatchHeadless(context: Context, task: JSONObject, data: Map<String, Any?>) {
+      if (TaskStore(context).isPaused()) return
+      val handler = task.optJSONObject("handler")
+      if (handler?.optString("type") == "native") {
+        nativeHandlers[handler.optString("name")]?.run(task.optString("id"), data)
+      }
+      val recurrence = TaskMapper.recurrence(task) ?: return
+      val next = RecurrenceEngine.nextRun(recurrence, System.currentTimeMillis()) ?: return
+      task.put("nextRunAt", next)
+      TaskStore(context).upsert(task)
+      if (TaskMapper.hasAlarmTrigger(task)) {
+        ConductorAlarmReceiver.schedule(context, task.optString("id"), next, TaskMapper.allowWhileIdle(task))
+      }
+    }
   }
 }

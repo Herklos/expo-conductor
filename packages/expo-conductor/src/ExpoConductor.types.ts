@@ -102,7 +102,11 @@ export interface AlarmTrigger {
 /** Run as an OS deferrable background task (WorkManager / BGTaskScheduler). */
 export interface BackgroundTaskTrigger {
   type: 'background';
-  /** Minimum interval in minutes between background executions. */
+  /**
+   * Minimum interval in minutes between background executions. On Android this is
+   * floored at 15 minutes (WorkManager limit); on iOS it is advisory — BGTaskScheduler
+   * decides actual timing.
+   */
   minimumIntervalMinutes?: number;
 }
 
@@ -289,3 +293,17 @@ export type ExpoConductorModuleEvents = {
   onTaskError: (payload: TaskErrorEventPayload) => void;
   onTaskSkipped: (payload: TaskSkippedEventPayload) => void;
 };
+
+// ---------------------------------------------------------------------------
+// Background availability
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether background execution is permitted on the device.
+ * - `available`   — background tasks may run.
+ * - `restricted`  — disabled by the OS/user (e.g. iOS Background App Refresh off,
+ *                   low-power mode, or Android background restrictions).
+ * - `unsupported` — the platform cannot run background tasks (e.g. web without
+ *                   Periodic Background Sync).
+ */
+export type ConductorStatus = 'available' | 'restricted' | 'unsupported';

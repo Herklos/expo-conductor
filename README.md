@@ -219,6 +219,7 @@ await Conductor.getTasks()
 await Conductor.runNow(id)                    // fire immediately, bypassing policy/budget
 await Conductor.setResourceBudget(budget)
 await Conductor.pause() / Conductor.resume()
+await Conductor.getStatus()                   // 'available' | 'restricted' | 'unsupported'
 
 Conductor.addListener('onTaskExecute',  (p) => {})
 Conductor.addListener('onTaskComplete', (p) => {})  // includes result
@@ -269,12 +270,32 @@ See [`fixtures/README.md`](./fixtures/README.md) for the shared behavior contrac
 - **iOS has no exact-alarm API.** `alarm` triggers fall back to a scheduled local
   notification; exact wall-clock wakeups aren’t guaranteed by the OS.
 - **iOS background execution** is opportunistic (BGTaskScheduler decides timing); minimum
-  intervals are advisory.
+  intervals are advisory, and **background tasks do not run on the iOS Simulator** — test
+  `background` triggers on a physical device. The BGTask launch handler and notification
+  delegate are registered for you via an Expo AppDelegate subscriber.
+- **iOS headless execution:** when the app is fully terminated, a **JS** handler cannot run
+  (there is no live JS runtime). Use a **native** handler (`handler.type: 'native'`,
+  registered with `ExpoConductorModule.registerHandler`) for work that must run while the
+  app is killed; JS handlers run when the app is foregrounded/backgrounded but alive.
 - **Android exact alarms** require the `SCHEDULE_EXACT_ALARM`/`USE_EXACT_ALARM` permissions
   (added by the plugin when `enableExactAlarms` is set); on Android 14+ the user may need
-  to grant them.
+  to grant them, and the module falls back to an inexact allow-while-idle alarm if the
+  permission isn’t granted.
+- **`Conductor.getStatus()`** reports whether background execution is permitted
+  (`available` / `restricted` / `unsupported`) — e.g. `restricted` when iOS Background App
+  Refresh is off or the Android app is background-restricted.
 - **Web** runs time/recurrence/notification triggers while the page (or a service worker)
   is alive; true background execution depends on Periodic Background Sync availability.
+
+### Relationship to `expo-background-task` / `expo-task-manager`
+
+expo-conductor implements its own scheduling so it can layer priority, resource-weight
+admission, multi-trigger and recurrence semantics on top. For apps that only need a single
+periodic background refresh, Expo’s [`expo-background-task`](https://docs.expo.dev/versions/latest/sdk/background-task/)
++ [`expo-task-manager`](https://docs.expo.dev/versions/latest/sdk/task-manager/) may be
+simpler. A future direction is to delegate the `background` trigger and headless JS
+dispatch to those modules (which already own the BGTask launch-handler and cold-start task
+registry) while keeping conductor’s engine for prioritization — see `CLAUDE.md`.
 
 ## License
 
