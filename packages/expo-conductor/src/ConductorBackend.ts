@@ -21,6 +21,12 @@ export interface ConductorBackend {
   cancelTaskAsync(id: string): Promise<boolean>;
   getTasksAsync(): Promise<RegisteredTask[]>;
   runTaskAsync(id: string): Promise<void>;
+  /**
+   * Run every task that is currently due through the normal admission/dispatch path.
+   * Used by a background tick (e.g. the optional expo-background-task integration) so a
+   * single OS wake can drive the engine. Returns the number of tasks fired.
+   */
+  runDueTasksAsync(): Promise<number>;
   setResourceBudgetAsync(budget: ResourceBudget): Promise<void>;
   pauseAsync(): Promise<void>;
   resumeAsync(): Promise<void>;

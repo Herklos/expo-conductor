@@ -353,15 +353,37 @@ The `push` trigger only matches tasks that declare a `push` trigger with a match
 - **Web** runs time/recurrence/notification triggers while the page (or a service worker)
   is alive; true background execution depends on Periodic Background Sync availability.
 
-### Relationship to `expo-background-task` / `expo-task-manager`
+### Headless JS via `expo-task-manager` / `expo-background-task` (optional)
 
-expo-conductor implements its own scheduling so it can layer priority, resource-weight
-admission, multi-trigger and recurrence semantics on top. For apps that only need a single
-periodic background refresh, Expo’s [`expo-background-task`](https://docs.expo.dev/versions/latest/sdk/background-task/)
-+ [`expo-task-manager`](https://docs.expo.dev/versions/latest/sdk/task-manager/) may be
-simpler. A future direction is to delegate the `background` trigger and headless JS
-dispatch to those modules (which already own the BGTask launch-handler and cold-start task
-registry) while keeping conductor’s engine for prioritization — see `CLAUDE.md`.
+By default a **JS** handler only runs while the app is alive (its registry is in-memory).
+To let JS handlers run after the app is **terminated**, opt into the first-party background
+task — `expo-task-manager`'s `defineTask` uses a persisted, global registry the OS can
+invoke headlessly, and conductor drives its engine from that tick:
+
+```sh
+npx expo install expo-task-manager expo-background-task
+```
+
+```ts
+// app entry — MODULE scope (not inside a component)
+import Conductor, { TaskResult } from 'expo-conductor';
+import { registerConductorBackgroundTask } from 'expo-conductor/task-manager';
+
+Conductor.defineTask('refresh', async () => TaskResult.SUCCESS);
+await registerConductorBackgroundTask({ minimumInterval: 15 }); // minutes (Android floor: 15)
+```
+
+When this tick fires, conductor runs every currently-due task through its engine
+(`Conductor.runDueTasks()`), so priority/weight/policy still apply. `expo-task-manager` /
+`expo-background-task` are **optional peer dependencies** — the core works without them, and
+the hand-rolled native BGTaskScheduler/WorkManager path remains the default. Both are
+verified on a device build (iOS BGTask doesn't run on the Simulator); use
+`expo-background-task`'s `triggerTaskWorkerForTestingAsync()` in development to fire the tick
+on demand.
+
+These modules also own user-visible **notifications**, permission prompts, and cold-start
+response handling; pairing conductor with `expo-notifications` for the `notification` path is
+a natural next step.
 
 ## License
 

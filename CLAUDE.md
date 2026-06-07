@@ -98,11 +98,14 @@ builds need the Android SDK / Xcode (not required for engine verification).
 - **Web `setTimeout` cap**: delays over ~24.8 days (2^31 ms) overflow, so `scheduleTimer`
   chains timers in <=MAX_TIMER_DELAY hops; the web engine also re-arms persisted tasks in
   its constructor (persistence would otherwise be write-only).
-- **Headless limits**: a JS handler can't run after the app is terminated (no JS runtime).
-  Native handlers (`type: 'native'`) run headless. A possible future direction is to
-  delegate the `background` trigger + cold-start dispatch to
-  `expo-background-task`/`expo-task-manager` while keeping conductor's engine for
-  prioritization.
+- **Headless limits + the optional interop**: by default a JS handler can't run after the
+  app is terminated (in-memory registry); native handlers (`type: 'native'`) run headless.
+  Phase 2 adds an OPT-IN bridge — `src/integrations/expoBackgroundTask.ts` (shipped as the
+  `expo-conductor/task-manager` entry) registers a `TaskManager.defineTask` tick via
+  `expo-background-task` that calls `Conductor.runDueTasks()` (backend `runDueTasksAsync`),
+  so JS handlers survive cold start. `expo-task-manager`/`expo-background-task` are OPTIONAL
+  peer deps; the core never imports them (only that integration file does). Native swap of
+  BGTaskScheduler/WorkManager for these is deferred — needs on-device verification.
 - **Kotlin uses nested block comments**: a `/*` inside a KDoc (e.g. writing `a/*b`) opens a
   nested comment. Avoid `/` immediately followed by `*` in doc comments.
 - **Publishing**: the `files` allowlist in `package.json` is explicit (plus `.npmignore`) so

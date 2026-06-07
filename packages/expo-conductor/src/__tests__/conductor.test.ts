@@ -34,6 +34,9 @@ class MockBackend implements ConductorBackend {
     return this.registered;
   }
   async runTaskAsync(): Promise<void> {}
+  async runDueTasksAsync(): Promise<number> {
+    return 0;
+  }
   async setResourceBudgetAsync(): Promise<void> {}
   async pauseAsync(): Promise<void> {}
   async resumeAsync(): Promise<void> {}

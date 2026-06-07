@@ -57,6 +57,9 @@ class ExpoConductorWebModule
   runTaskAsync(id: string): Promise<void> {
     return this.engine.runTaskAsync(id);
   }
+  runDueTasksAsync(): Promise<number> {
+    return this.engine.runDueTasksAsync();
+  }
   setResourceBudgetAsync(budget: ResourceBudget): Promise<void> {
     return this.engine.setResourceBudgetAsync(budget);
   }

@@ -280,6 +280,21 @@ describe('WebSchedulerEngine', () => {
     expect(skipped).toEqual([{ taskId: 'b', reason: 'DEFERRED_BY_BUDGET' }]);
   });
 
+  it('runDueTasksAsync fires due tasks (priority order) and skips not-yet-due ones', async () => {
+    // Timers disabled so dispatch happens only through the explicit due-pass.
+    const engine = new WebSchedulerEngine({ now: () => 5000, setTimer: () => 0, clearTimer: () => {} });
+    const fired: string[] = [];
+    engine.addListener('onTaskExecute', (p) => fired.push(p.taskId));
+
+    await engine.registerTaskAsync({ id: 'x', priority: 1, triggers: [{ type: 'time', at: 1000 }] });
+    await engine.registerTaskAsync({ id: 'y', priority: 9, triggers: [{ type: 'time', at: 1000 }] });
+    await engine.registerTaskAsync({ id: 'later', triggers: [{ type: 'time', at: 9_999_999 }] });
+
+    const count = await engine.runDueTasksAsync();
+    expect(count).toBe(2); // x and y are due; 'later' is not
+    expect(fired).toEqual(['y', 'x']); // highest priority first
+  });
+
   it('getStatusAsync reports available on web', async () => {
     const h = makeHarness();
     const engine = new WebSchedulerEngine({ now: h.now, setTimer: h.setTimer, clearTimer: h.clearTimer });
