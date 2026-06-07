@@ -55,6 +55,7 @@
     "android/src",
     "ios/ExpoConductor.podspec",
     "ios/ExpoConductorModule.swift",
+    "ios/ConductorAppDelegate.swift",
     "ios/ConductorTaskHandler.swift",
     "ios/Engine",
     "ios/Triggers",
