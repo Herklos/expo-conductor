@@ -1,5 +1,5 @@
 {
-  "name": "expo-conductor-monorepo",
+  "name": "@drakkar.software/expo-conductor",
   "version": "0.1.0",
   "private": false,
   "description": "Monorepo for expo-conductor: a task orchestration Expo native module, plus a demo app.",
