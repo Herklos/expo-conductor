@@ -381,9 +381,32 @@ verified on a device build (iOS BGTask doesn't run on the Simulator); use
 `expo-background-task`'s `triggerTaskWorkerForTestingAsync()` in development to fire the tick
 on demand.
 
-These modules also own user-visible **notifications**, permission prompts, and cold-start
-response handling; pairing conductor with `expo-notifications` for the `notification` path is
-a natural next step.
+### Notifications via `expo-notifications` (optional)
+
+`expo-notifications` owns the notification concerns conductor can't do well alone — real
+permission prompts (incl. Android 13+ from an Activity), notification channels, foreground
+presentation, and **cold-start response handling** (a tap that relaunches a terminated app):
+
+```sh
+npx expo install expo-notifications
+```
+
+```ts
+import { setupConductorNotifications } from 'expo-conductor/notifications';
+
+await setupConductorNotifications(); // foreground handler + Android channel + response routing
+```
+
+A notification whose `content.data.conductorTask` is a task id then runs that task (via
+`Conductor.runNow`) when delivered or tapped — including from a cold start, via
+`getLastNotificationResponseAsync`. `requestConductorNotificationPermissions()` performs the
+real prompt. `expo-notifications` is an **optional peer dependency**; conductor's own
+notification display (Android channel + `NotificationManagerCompat`, iOS
+`UNUserNotificationCenter`) remains the default when it isn't used.
+
+> Phase 3 is a draft: this wires permissions/channel/foreground/response-routing through
+> `expo-notifications`. Having it also *schedule* conductor's notifications (replacing the
+> native scheduling) and the on-device validation are a follow-up.
 
 ## License
 

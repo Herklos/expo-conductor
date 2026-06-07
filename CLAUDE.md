@@ -106,6 +106,12 @@ builds need the Android SDK / Xcode (not required for engine verification).
   so JS handlers survive cold start. `expo-task-manager`/`expo-background-task` are OPTIONAL
   peer deps; the core never imports them (only that integration file does). Native swap of
   BGTaskScheduler/WorkManager for these is deferred — needs on-device verification.
+- **Optional integrations live in `src/integrations/`** and ship as subpath exports
+  (`expo-conductor/task-manager`, `expo-conductor/notifications`). Each statically imports its
+  optional peer dep, so the core must NEVER import these files. `expoNotifications.ts`
+  (Phase 3 draft) delegates permission prompts, Android channels, foreground presentation and
+  cold-start response routing to `expo-notifications`. When you add an integration: add the
+  optional peer dep + `peerDependenciesMeta.optional` + devDep + an `exports` entry.
 - **Kotlin uses nested block comments**: a `/*` inside a KDoc (e.g. writing `a/*b`) opens a
   nested comment. Avoid `/` immediately followed by `*` in doc comments.
 - **Publishing**: the `files` allowlist in `package.json` is explicit (plus `.npmignore`) so
