@@ -46,6 +46,14 @@
         { "id": "c", "priority": -1, "dueAt": 0 }
       ],
       "expected": ["b", "c", "a"]
+    },
+    {
+      "name": "id tiebreaker uses UTF-16 code-unit order, not Unicode scalar (astral vs BMP)",
+      "tasks": [
+        { "id": "ﬀ", "priority": 0, "dueAt": 0 },
+        { "id": "😀", "priority": 0, "dueAt": 0 }
+      ],
+      "expected": ["😀", "ﬀ"]
     }
   ]
 }

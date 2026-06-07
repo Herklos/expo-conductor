@@ -24,13 +24,18 @@ class ConductorMessagingService : FirebaseMessagingService() {
 
   companion object {
     fun handleRemoteData(context: android.content.Context, data: Map<String, String>) {
-      val key = data["conductorTask"] ?: return
+      // Reject a missing OR empty key: a forged `conductorTask=""` must not match a push
+      // trigger that declared no matchKey (optString returns "" for an absent matchKey, so
+      // "" == "" would otherwise fire it). Require both sides non-empty.
+      val key = data["conductorTask"]
+      if (key.isNullOrEmpty()) return
       val store = TaskStore(context)
       val task = store.all().firstOrNull { task ->
         val triggers = task.optJSONArray("triggers") ?: return@firstOrNull false
         (0 until triggers.length()).any {
           val t = triggers.getJSONObject(it)
-          t.optString("type") == "push" && (t.optString("matchKey") == key)
+          val matchKey = t.optString("matchKey")
+          t.optString("type") == "push" && matchKey.isNotEmpty() && matchKey == key
         }
       } ?: return
       val module = ExpoConductorModule.INSTANCE

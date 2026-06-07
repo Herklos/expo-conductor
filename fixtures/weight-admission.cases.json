@@ -99,6 +99,15 @@
         { "id": "solo", "priority": 1, "dueAt": 0, "maxConcurrent": 1, "weight": { "cpu": 0.1, "network": 0.1, "battery": 0.1, "memory": 0.1 } }
       ],
       "expected": { "admitted": [], "deferred": ["solo"] }
+    },
+    {
+      "name": "id tiebreaker decides admission by UTF-16 code-unit order (astral vs BMP)",
+      "budget": { "cpu": 1, "network": 1, "battery": 1, "memory": 1 },
+      "tasks": [
+        { "id": "ﬀ", "priority": 0, "dueAt": 0, "weight": { "cpu": 0.6, "network": 0.1, "battery": 0.1, "memory": 0.1 } },
+        { "id": "😀", "priority": 0, "dueAt": 0, "weight": { "cpu": 0.6, "network": 0.1, "battery": 0.1, "memory": 0.1 } }
+      ],
+      "expected": { "admitted": ["😀"], "deferred": ["ﬀ"] }
     }
   ]
 }

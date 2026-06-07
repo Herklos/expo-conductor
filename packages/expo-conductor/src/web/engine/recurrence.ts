@@ -21,28 +21,65 @@ function timeOfDayOffset(hour: number, minute: number): number {
   return hour * MS_PER_HOUR + minute * MS_PER_MINUTE;
 }
 
+/**
+ * Strict integer token parse: "30" -> 30; "30abc" / "" / "*" / "6x" -> null. Mirrors Kotlin
+ * `String.toIntOrNull` and Swift `Int(_:)` so all three engines accept exactly the same cron
+ * tokens (JS `parseInt` is lenient and would diverge — "30abc" -> 30 there but null here).
+ */
+function parseIntStrict(token: string): number | null {
+  return /^[+-]?\d+$/.test(token) ? Number(token) : null;
+}
+
+/**
+ * Split a cron expression into its three fields, or null when malformed (not exactly three
+ * fields). Splits on ASCII whitespace only — space/tab/newline/CR — NOT the broader Unicode
+ * `\s`, because `\s` covers NBSP/form-feed/vertical-tab differently across JS, Kotlin and
+ * Swift; using a fixed ASCII class keeps the three engines splitting identically.
+ */
+export function parseCronFields(expression: string): [string, string, string] | null {
+  const fields = expression.split(/[ \t\n\r]+/).filter((f) => f.length > 0);
+  return fields.length === 3 ? (fields as [string, string, string]) : null;
+}
+
+function isValidCronField(field: string): boolean {
+  if (field === '*') return true;
+  if (field.startsWith('*/')) {
+    const step = parseIntStrict(field.slice(2));
+    return step != null && step > 0;
+  }
+  const parts = field.split(',');
+  return parts.length > 0 && parts.every((p) => parseIntStrict(p) != null);
+}
+
+/**
+ * Whether a cron expression is well-formed (exactly three fields, each `*`, `*​/<+int>`, or a
+ * comma list of integers). The engine itself stays total (returns null on malformed input so
+ * parity holds and a fixture can express it); this is used by the normalize boundary to
+ * reject typos at registration instead of letting a task silently never fire.
+ */
+export function isValidCronExpression(expression: string): boolean {
+  const fields = parseCronFields(expression);
+  return fields != null && fields.every(isValidCronField);
+}
+
 function matchCronField(field: string, value: number): boolean {
   if (field === '*') return true;
   if (field.startsWith('*/')) {
-    const step = parseInt(field.slice(2), 10);
-    return step > 0 && value % step === 0;
+    const step = parseIntStrict(field.slice(2));
+    return step != null && step > 0 && value % step === 0;
   }
-  return field
-    .split(',')
-    .map((part) => parseInt(part, 10))
-    .includes(value);
+  return field.split(',').some((part) => parseIntStrict(part) === value);
 }
 
 /** Search bound for cron resolution: ~366 days of minutes. */
 const CRON_MAX_ITERATIONS = 366 * 24 * 60;
 
 function nextCron(expression: string, fromMs: number): number | null {
-  const fields = expression.trim().split(/\s+/);
-  if (fields.length !== 3) {
-    throw new Error(
-      `Invalid cron expression "${expression}" (expected "minute hour dayOfWeek")`,
-    );
-  }
+  const fields = parseCronFields(expression);
+  // A malformed expression yields no next run — identical across all three engines, so it is
+  // expressible as a `null` fixture. Registration-time rejection lives at the normalize
+  // boundary (`isValidCronExpression`), which throws so a typo surfaces up front.
+  if (fields == null) return null;
   const [minuteField, hourField, dowField] = fields;
   let candidate = (Math.floor(fromMs / MS_PER_MINUTE) + 1) * MS_PER_MINUTE;
   for (let i = 0; i < CRON_MAX_ITERATIONS; i++) {

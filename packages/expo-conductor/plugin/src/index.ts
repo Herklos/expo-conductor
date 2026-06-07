@@ -18,8 +18,15 @@ import {
 export interface ConductorPluginOptions {
   /** Compile + register the Firebase Cloud Messaging trigger (requires google-services). */
   enableFcm?: boolean;
-  /** Request exact-alarm permissions on Android (SCHEDULE_EXACT_ALARM / USE_EXACT_ALARM). */
+  /** Request the user-revocable `SCHEDULE_EXACT_ALARM` permission (API 31+) for exact alarms.
+   *  Default `true`. The module gracefully falls back to an inexact allow-while-idle alarm
+   *  when the permission isn't granted, so this is safe for a general-purpose app. */
   enableExactAlarms?: boolean;
+  /** Also request `USE_EXACT_ALARM` (API 33+), the **non-revocable** variant. Default `false`:
+   *  Google Play restricts it to alarm-clock / calendar / reminder-class apps, so a general
+   *  scheduler should NOT ship it (`SCHEDULE_EXACT_ALARM` alone is sufficient). Enable only if
+   *  your app's core purpose qualifies, or Play may reject the build. */
+  useExactAlarmClock?: boolean;
   /** Enable the iOS remote-notification background mode for the `push` trigger (APNs).
    *  `enableFcm` implies this; set it on its own for an APNs-only (no Firebase) setup. */
   enablePush?: boolean;
@@ -34,18 +41,23 @@ const ANDROID_PERMISSIONS = [
   'android.permission.POST_NOTIFICATIONS',
 ];
 
-const EXACT_ALARM_PERMISSIONS = [
-  'android.permission.SCHEDULE_EXACT_ALARM',
-  'android.permission.USE_EXACT_ALARM',
-];
+// The user-revocable exact-alarm permission a general scheduler should use (API 31+).
+const SCHEDULE_EXACT_ALARM = 'android.permission.SCHEDULE_EXACT_ALARM';
+// The non-revocable variant (API 33+) — Play-restricted to alarm-clock/calendar apps, opt-in.
+const USE_EXACT_ALARM = 'android.permission.USE_EXACT_ALARM';
 
 const DEFAULT_BG_IDENTIFIERS = ['com.expoconductor.refresh'];
 
 const withConductorAndroid: ConfigPlugin<ConductorPluginOptions> = (config, options) => {
-  // Permissions.
+  // Permissions. SCHEDULE_EXACT_ALARM ships by default (revocable, safe); USE_EXACT_ALARM is
+  // Play-restricted, so it ships ONLY when the app explicitly opts in via useExactAlarmClock.
+  const exactAlarmPermissions = [
+    ...(options.enableExactAlarms !== false ? [SCHEDULE_EXACT_ALARM] : []),
+    ...(options.useExactAlarmClock ? [USE_EXACT_ALARM] : []),
+  ];
   config = AndroidConfig.Permissions.withPermissions(config, [
     ...ANDROID_PERMISSIONS,
-    ...(options.enableExactAlarms !== false ? EXACT_ALARM_PERMISSIONS : []),
+    ...exactAlarmPermissions,
   ]);
 
   // Pass the FCM toggle to the module's build.gradle.

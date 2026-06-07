@@ -32,7 +32,7 @@ public enum WeightEngine {
   private static func isBefore(_ a: Task, _ b: Task) -> Bool {
     if a.priority != b.priority { return a.priority > b.priority }
     if a.dueAt != b.dueAt { return a.dueAt < b.dueAt }
-    return a.id < b.id
+    return idOrderedBefore(a.id, b.id) // UTF-16 code-unit order, matching JS/Kotlin
   }
 
   /// Skip-over greedy admission ordered by the priority comparator, honoring per-task

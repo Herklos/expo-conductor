@@ -3,6 +3,24 @@ import Foundation
 /// Pure, framework-free model for the conductor engine. Mirrors the TypeScript
 /// contract and Kotlin `Models.kt`, exercised by the shared fixtures in `/fixtures`.
 
+/// Lexicographic comparison by UTF-16 code unit. Matches JavaScript string `<` and Kotlin
+/// `String.compareTo`, so the `id` tiebreaker orders identically on all three engines.
+/// Swift's native `String <` compares by Unicode canonical order, which diverges for
+/// non-ASCII ids (e.g. an astral emoji vs a BMP ligature sort the opposite way), so the
+/// priority/weight comparators must use this instead of `<`.
+func idOrderedBefore(_ a: String, _ b: String) -> Bool {
+  let ua = a.utf16, ub = b.utf16
+  var ia = ua.startIndex, ib = ub.startIndex
+  while ia != ua.endIndex, ib != ub.endIndex {
+    let ca = ua[ia], cb = ub[ib]
+    if ca != cb { return ca < cb }
+    ia = ua.index(after: ia)
+    ib = ub.index(after: ib)
+  }
+  // Equal up to the shorter length: the shorter string sorts first (matches JS/Kotlin).
+  return ia == ua.endIndex && ib != ub.endIndex
+}
+
 public enum Recurrence: Equatable {
   case interval(everyMs: Int, anchor: Int)
   case daily(hour: Int, minute: Int)

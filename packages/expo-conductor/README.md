@@ -39,7 +39,7 @@ await Conductor.schedule({
   (Android channel auto-created). Call `Conductor.requestPermissions()` first.
 
 See the [full documentation](../../README.md) for triggers, policy/weight/priority, the
-config plugin options (`enableFcm`, `enablePush`, `enableExactAlarms`,
+config plugin options (`enableFcm`, `enablePush`, `enableExactAlarms`, `useExactAlarmClock`,
 `backgroundTaskIdentifiers`), platform support matrix, and the device test guide.
 
 ## Scripts

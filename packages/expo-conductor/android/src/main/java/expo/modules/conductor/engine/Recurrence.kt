@@ -25,14 +25,19 @@ object RecurrenceEngine {
       val step = field.substring(2).toIntOrNull() ?: return false
       return step > 0 && value % step == 0
     }
-    return field.split(",").mapNotNull { it.trim().toIntOrNull() }.contains(value)
+    // Parse each comma part raw (no trimming): a part can't contain a separator after the
+    // field split, and trimming would strip non-ASCII whitespace (NBSP) that Swift/JS keep,
+    // re-introducing a cross-engine divergence.
+    return field.split(",").mapNotNull { it.toIntOrNull() }.contains(value)
   }
 
   private fun nextCron(expression: String, fromMs: Long): Long? {
-    val fields = expression.trim().split(Regex("\\s+"))
-    require(fields.size == 3) {
-      "Invalid cron expression \"$expression\" (expected \"minute hour dayOfWeek\")"
-    }
+    // Split on ASCII whitespace only (space/tab/newline/CR), NOT Java's broader \\s, so the
+    // three engines split identically. A malformed expression (not exactly three fields)
+    // yields null — identical across TS/Kotlin/Swift, so it is expressible as a `null`
+    // fixture. Registration-time rejection is the normalize boundary's job (see normalize.ts).
+    val fields = expression.split(Regex("[ \t\n\r]+")).filter { it.isNotEmpty() }
+    if (fields.size != 3) return null
     val (minuteField, hourField, dowField) = fields
     var candidate = (Math.floorDiv(fromMs, MS_PER_MINUTE) + 1) * MS_PER_MINUTE
     for (i in 0 until CRON_MAX_ITERATIONS) {

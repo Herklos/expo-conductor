@@ -295,6 +295,25 @@ describe('WebSchedulerEngine', () => {
     expect(fired).toEqual(['y', 'x']); // highest priority first
   });
 
+  it('runDueTasksAsync returns the number FIRED, not merely due (budget-deferred excluded)', async () => {
+    const engine = new WebSchedulerEngine({ now: () => 5000, setTimer: () => 0, clearTimer: () => {} });
+    const fired: string[] = [];
+    const skipped: string[] = [];
+    engine.addListener('onTaskExecute', (p) => fired.push(p.taskId));
+    engine.addListener('onTaskSkipped', (p) => skipped.push(p.taskId));
+    await engine.setResourceBudgetAsync({ cpu: 1, network: 1, battery: 1, memory: 1 });
+
+    // Two due tasks that can't both fit (cpu 0.7 each): the lower-priority one is deferred.
+    const heavy = { cpu: 0.7, network: 0.1, battery: 0.1, memory: 0.1 } as const;
+    await engine.registerTaskAsync({ id: 'a', priority: 9, weight: heavy, triggers: [{ type: 'time', at: 1000 }] });
+    await engine.registerTaskAsync({ id: 'b', priority: 1, weight: heavy, triggers: [{ type: 'time', at: 1000 }] });
+
+    const count = await engine.runDueTasksAsync();
+    expect(count).toBe(1); // both due, but only 'a' actually fired — 'b' was deferred by budget
+    expect(fired).toEqual(['a']);
+    expect(skipped).toEqual(['b']);
+  });
+
   it('getStatusAsync reports available on web', async () => {
     const h = makeHarness();
     const engine = new WebSchedulerEngine({ now: h.now, setTimer: h.setTimer, clearTimer: h.clearTimer });

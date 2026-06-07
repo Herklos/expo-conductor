@@ -14,6 +14,30 @@ final class ConductorNotificationDelegate: NSObject, UNUserNotificationCenterDel
   // alive to forward foreign notifications to it.
   private var previousDelegate: UNUserNotificationCenterDelegate?
 
+  // Dedup the two callbacks for a SINGLE delivery: when the app is foreground, willPresent
+  // (delivery) runs the task, and if the user then taps the banner, didReceive fires for the
+  // same notification — without this both would dispatch, double-running a non-idempotent
+  // handler. Keyed on the request identifier with a window shorter than iOS's 60s minimum
+  // repeat interval, so a genuine later re-delivery of a repeating notification is NOT
+  // suppressed.
+  private let dedupLock = NSLock()
+  private var lastHandledAt: [String: Date] = [:]
+  private let dedupWindow: TimeInterval = 30
+
+  /// Run `handle(userInfo)` at most once per notification `identifier` within `dedupWindow`.
+  private func handleOnce(_ identifier: String, _ userInfo: [AnyHashable: Any]) {
+    let now = Date()
+    dedupLock.lock()
+    lastHandledAt = lastHandledAt.filter { now.timeIntervalSince($0.value) < dedupWindow }
+    if let last = lastHandledAt[identifier], now.timeIntervalSince(last) < dedupWindow {
+      dedupLock.unlock()
+      return
+    }
+    lastHandledAt[identifier] = now
+    dedupLock.unlock()
+    handle(userInfo)
+  }
+
   static func install() {
     let center = UNUserNotificationCenter.current()
     if center.delegate !== shared {
@@ -29,7 +53,7 @@ final class ConductorNotificationDelegate: NSObject, UNUserNotificationCenterDel
   ) {
     let userInfo = notification.request.content.userInfo
     if userInfo["conductorTask"] != nil {
-      handle(userInfo)
+      handleOnce(notification.request.identifier, userInfo)
       completionHandler([.banner, .list, .sound])
       return
     }
@@ -47,7 +71,7 @@ final class ConductorNotificationDelegate: NSObject, UNUserNotificationCenterDel
   ) {
     let userInfo = response.notification.request.content.userInfo
     if userInfo["conductorTask"] != nil {
-      handle(userInfo)
+      handleOnce(response.notification.request.identifier, userInfo)
       completionHandler()
       return
     }

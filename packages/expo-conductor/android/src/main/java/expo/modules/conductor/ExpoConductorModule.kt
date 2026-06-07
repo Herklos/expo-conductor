@@ -81,8 +81,8 @@ class ExpoConductorModule : Module() {
         .sortedWith(compareByDescending<org.json.JSONObject> { it.optInt("priority", 0) }
           .thenBy { it.optLong("nextRunAt") }
           .thenBy { it.optString("id") })
-      due.forEach { dispatch(it, manual = false) }
-      due.size
+      // Count tasks actually fired, not merely due (policy/budget can skip some).
+      due.count { dispatch(it, manual = false) }
     }
 
     AsyncFunction("setResourceBudgetAsync") { budget: Map<String, Any?> ->
@@ -199,8 +199,12 @@ class ExpoConductorModule : Module() {
 
   // --- dispatch ------------------------------------------------------------
 
-  /** Called by triggers (Worker, AlarmReceiver, FCM) when a task should run. */
-  fun dispatch(task: JSONObject, manual: Boolean, data: Map<String, Any?> = emptyMap()) {
+  /**
+   * Called by triggers (Worker, AlarmReceiver, FCM) when a task should run. Returns whether
+   * the task actually fired (emitted onTaskExecute) — false when it was not yet due or was
+   * skipped by policy/budget — so [runDueTasksAsync] can report the number truly fired.
+   */
+  fun dispatch(task: JSONObject, manual: Boolean, data: Map<String, Any?> = emptyMap()): Boolean {
     val id = task.optString("id")
 
     if (!manual) {
@@ -209,24 +213,34 @@ class ExpoConductorModule : Module() {
       // it would fire on every tick. Not-yet-due ticks are a no-op (the worker succeeds).
       val nextRunAt = if (task.isNull("nextRunAt")) null else task.optLong("nextRunAt")
       if (nextRunAt != null && System.currentTimeMillis() < nextRunAt) {
-        return
+        return false
       }
       val decision = PolicyEngine.evaluate(TaskMapper.constraints(task), deviceContext())
       if (!decision.eligible) {
         emitSkipped(id, decision.reason.name)
-        return
+        return false
       }
       // Admit against the budget/count consumed by tasks already running in this process
-      // (best-effort cross-task budgeting; a killed/relaunched process starts empty).
-      val usage = runningUsage(id)
-      val admission = WeightEngine.admit(
-        resourceBudget, listOf(TaskMapper.weightedTask(task)), usage.first, usage.second,
-      )
-      if (!admission.admitted.contains(id)) {
-        emitSkipped(id, "DEFERRED_BY_BUDGET")
-        return
+      // (best-effort cross-task budgeting; a killed/relaunched process starts empty). The
+      // check-then-reserve is serialized on `running` so two trigger threads (e.g. an alarm
+      // receiver on the main thread and a WorkManager worker on a background thread) can't
+      // both observe the same usage, both pass admission, and overshoot the budget.
+      val admitted = synchronized(running) {
+        val usage = runningUsage(id)
+        val admission = WeightEngine.admit(
+          resourceBudget, listOf(TaskMapper.weightedTask(task)), usage.first, usage.second,
+        )
+        if (admission.admitted.contains(id)) {
+          running[id] = TaskMapper.weightOf(task)
+          true
+        } else {
+          false
+        }
       }
-      running[id] = TaskMapper.weightOf(task)
+      if (!admitted) {
+        emitSkipped(id, "DEFERRED_BY_BUDGET")
+        return false
+      }
     }
 
     val handlerType = task.optJSONObject("handler")?.optString("type") ?: "js"
@@ -257,6 +271,7 @@ class ExpoConductorModule : Module() {
 
     // A manual run-now must not advance the task's real schedule (matches the TS engine).
     if (!manual) advanceRecurrence(task)
+    return true
   }
 
   private fun advanceRecurrence(task: JSONObject) {

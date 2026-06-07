@@ -120,6 +120,36 @@
       "spec": { "kind": "daily", "hour": 0, "minute": 0 },
       "fromMs": 8640000000,
       "expected": 8726400000
+    },
+    {
+      "name": "cron: malformed (2 fields) never fires",
+      "spec": { "kind": "cron", "expression": "* *" },
+      "fromMs": 0,
+      "expected": null
+    },
+    {
+      "name": "cron: malformed (4 fields) never fires",
+      "spec": { "kind": "cron", "expression": "30 9 * extra" },
+      "fromMs": 0,
+      "expected": null
+    },
+    {
+      "name": "cron: non-numeric token never fires",
+      "spec": { "kind": "cron", "expression": "30abc 9 *" },
+      "fromMs": 0,
+      "expected": null
+    },
+    {
+      "name": "cron: NBSP is not a field separator (malformed -> never fires)",
+      "spec": { "kind": "cron", "expression": "0 0 5" },
+      "fromMs": 0,
+      "expected": null
+    },
+    {
+      "name": "cron: form-feed is not a field separator (malformed -> never fires)",
+      "spec": { "kind": "cron", "expression": "0 0\f5" },
+      "fromMs": 0,
+      "expected": null
     }
   ]
 }

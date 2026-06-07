@@ -14,11 +14,12 @@ public enum PriorityEngine {
     }
   }
 
-  /// priority desc, then dueAt asc, then id asc.
+  /// priority desc, then dueAt asc, then id asc (id compared by UTF-16 code unit to match
+  /// JS/Kotlin — see `idOrderedBefore`).
   public static func isBefore(_ a: Item, _ b: Item) -> Bool {
     if a.priority != b.priority { return a.priority > b.priority }
     if a.dueAt != b.dueAt { return a.dueAt < b.dueAt }
-    return a.id < b.id
+    return idOrderedBefore(a.id, b.id)
   }
 
   public static func order(_ items: [Item]) -> [String] {

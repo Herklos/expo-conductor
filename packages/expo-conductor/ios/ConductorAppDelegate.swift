@@ -37,14 +37,17 @@ public class ConductorAppDelegate: ExpoAppDelegateSubscriber {
     didReceiveRemoteNotification userInfo: [AnyHashable: Any],
     fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
   ) {
-    guard let key = userInfo["conductorTask"] as? String else {
+    // Reject a missing OR empty key so a forged `conductorTask=""` can't match a push trigger
+    // that declared no matchKey. Require both sides non-empty (mirrors the Android FCM path).
+    guard let key = userInfo["conductorTask"] as? String, !key.isEmpty else {
       completionHandler(.noData)
       return
     }
     let task = TaskStore().all().first { task in
       let triggers = task["triggers"] as? [[String: Any]] ?? []
       return triggers.contains {
-        ($0["type"] as? String) == "push" && ($0["matchKey"] as? String) == key
+        guard ($0["type"] as? String) == "push", let matchKey = $0["matchKey"] as? String else { return false }
+        return !matchKey.isEmpty && matchKey == key
       }
     }
     guard let task else {

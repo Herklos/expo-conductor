@@ -10,7 +10,7 @@ import {
   type TaskDefinition,
   type Trigger,
 } from '../ExpoConductor.types';
-import { nextRun } from './engine/recurrence';
+import { isValidCronExpression, nextRun } from './engine/recurrence';
 import { resolveWeight } from './engine/weight';
 
 /** Derive the recurrence to schedule from explicit recurrence or triggers. */
@@ -18,6 +18,21 @@ function recurrenceFor(def: TaskDefinition): Recurrence | undefined {
   if (def.recurrence) return def.recurrence;
   const recurrenceTrigger = def.triggers.find((t) => t.type === 'recurrence');
   return recurrenceTrigger?.type === 'recurrence' ? recurrenceTrigger.recurrence : undefined;
+}
+
+/**
+ * Reject a malformed cron expression at registration (fail fast) rather than letting the
+ * engine silently return null and the task never fire. The engines themselves stay total
+ * (return null) so cross-platform parity holds; this boundary check is the developer-facing
+ * guard. Throws on a cron recurrence whose expression isn't exactly three valid fields.
+ */
+function assertValidRecurrence(recurrence: Recurrence | undefined): void {
+  if (recurrence?.kind === 'cron' && !isValidCronExpression(recurrence.expression)) {
+    throw new Error(
+      `Invalid cron expression "${recurrence.expression}" (expected "minute hour dayOfWeek", ` +
+        `each field "*", "*/<n>", or a comma list of integers)`,
+    );
+  }
 }
 
 /** Compute the earliest concrete fire time implied by a task's triggers. */
@@ -59,6 +74,7 @@ export function computeNextRunAt(
 
 export function normalize(def: TaskDefinition, now: number = Date.now()): RegisteredTask {
   const recurrence = recurrenceFor(def);
+  assertValidRecurrence(recurrence);
   return {
     id: def.id,
     handler: def.handler ?? { name: def.id, type: 'js' },

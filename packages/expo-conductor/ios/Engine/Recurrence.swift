@@ -31,13 +31,18 @@ public enum RecurrenceEngine {
       guard let step = Int(field.dropFirst(2)), step > 0 else { return false }
       return value % step == 0
     }
-    return field.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }.contains(value)
+    // Parse each comma part raw (no trimming): after splitting fields on ASCII whitespace a
+    // part can't contain a separator, and trimming would strip non-ASCII whitespace (NBSP)
+    // that Kotlin/JS do not — re-introducing a cross-engine divergence.
+    return field.split(separator: ",").compactMap { Int($0) }.contains(value)
   }
 
   private static func nextCron(_ expression: String, _ fromMs: Int) -> Int? {
+    // Split on ASCII whitespace only (space/tab/newline/CR), NOT the broader Unicode set, so
+    // the three engines split identically. A malformed expression (not exactly three fields)
+    // yields no next run — identical across TS/Kotlin/Swift, so it is expressible as a `null`
+    // fixture. Registration-time rejection is the normalize boundary's job (see normalize.ts).
     let fields = expression.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "\n" || $0 == "\r" })
-    // A malformed expression yields no next run (matches the TS engine, which surfaces
-    // an error rather than aborting the process).
     guard fields.count == 3 else { return nil }
     let minuteField = String(fields[0])
     let hourField = String(fields[1])

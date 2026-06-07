@@ -20,6 +20,8 @@ apps/*/ios/
 **/build/
 *.xcworkspace
 Pods/
+# SwiftPM build output (from `swift test` / `pnpm test:swift`)
+**/.build/
 
 # logs / os
 *.log

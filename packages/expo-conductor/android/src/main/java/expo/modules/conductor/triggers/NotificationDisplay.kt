@@ -19,6 +19,15 @@ object NotificationDisplay {
   const val CHANNEL_ID = "expo_conductor_default"
   private const val CHANNEL_NAME = "Tasks"
 
+  // Stable, collision-free notification id per task id. taskId.hashCode() can collide for
+  // distinct ids, which would cross-overwrite notifications and (via the content PendingIntent
+  // requestCode) route a tap to the wrong task; a monotonic registry never aliases two ids.
+  private val notificationIds = java.util.concurrent.ConcurrentHashMap<String, Int>()
+  private val nextNotificationId = java.util.concurrent.atomic.AtomicInteger(1)
+
+  private fun notificationIdFor(taskId: String): Int =
+    notificationIds.computeIfAbsent(taskId) { nextNotificationId.getAndIncrement() }
+
   private fun ensureChannel(context: Context) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
     val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -33,11 +42,15 @@ object NotificationDisplay {
     val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)
       ?.apply {
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        // A per-id data Uri makes the PendingIntent unique per task even when requestCodes
+        // collide (Intent.filterEquals ignores extras but compares data) — so a tap always
+        // routes to the right task. Mirrors ConductorAlarmReceiver.
+        setData(android.net.Uri.parse("conductor://task/$taskId"))
         putExtra("conductorTask", taskId)
       } ?: return null
     return PendingIntent.getActivity(
       context,
-      taskId.hashCode(),
+      notificationIdFor(taskId),
       launch,
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
@@ -52,6 +65,6 @@ object NotificationDisplay {
       .setContentIntent(contentIntent(context, taskId))
     if (body != null) builder.setContentText(body)
     // POST_NOTIFICATIONS (API 33+) must be granted; notify() no-ops if it isn't.
-    NotificationManagerCompat.from(context).notify(taskId.hashCode(), builder.build())
+    NotificationManagerCompat.from(context).notify(notificationIdFor(taskId), builder.build())
   }
 }

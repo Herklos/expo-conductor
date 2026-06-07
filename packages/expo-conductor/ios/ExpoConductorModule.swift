@@ -12,8 +12,21 @@ import UIKit
 public class ExpoConductorModule: Module {
   static weak var shared: ExpoConductorModule?
   private let store = TaskStore()
-  private var paused = false
-  private var budget = ResourceWeight(cpu: 1, network: 1, battery: 1, memory: 1)
+  // `paused` and `budget` are written from AsyncFunction closures (the module queue) but read
+  // from dispatch()/schedule() on notification/BGTask background threads, so guard them with a
+  // lock like `running` (a torn read of the 4-Double `budget` struct or a stale `paused` could
+  // otherwise admit/skip incorrectly on a concurrent background wake).
+  private let stateLock = NSLock()
+  private var _paused = false
+  private var _budget = ResourceWeight(cpu: 1, network: 1, battery: 1, memory: 1)
+  private var paused: Bool {
+    get { stateLock.lock(); defer { stateLock.unlock() }; return _paused }
+    set { stateLock.lock(); defer { stateLock.unlock() }; _paused = newValue }
+  }
+  private var budget: ResourceWeight {
+    get { stateLock.lock(); defer { stateLock.unlock() }; return _budget }
+    set { stateLock.lock(); defer { stateLock.unlock() }; _budget = newValue }
+  }
   // Weight of tasks currently running in this process, for best-effort cross-task budgeting.
   // Guarded by `runningLock` since dispatch runs on notification/BGTask threads.
   private var running: [String: ResourceWeight] = [:]
@@ -21,24 +34,29 @@ public class ExpoConductorModule: Module {
 
   private func nowMs() -> Int { Int(Date().timeIntervalSince1970 * 1000) }
 
-  private func markRunning(_ id: String, _ weight: ResourceWeight) {
-    runningLock.lock(); defer { runningLock.unlock() }
-    running[id] = weight
-  }
-
   private func clearRunning(_ id: String) {
     runningLock.lock(); defer { runningLock.unlock() }
     running[id] = nil
   }
 
-  /// Budget + count consumed by other in-flight tasks (excluding `excludeId`).
-  private func runningUsage(excluding excludeId: String) -> (Int, ResourceWeight) {
+  /// Atomically admit `id` against the budget and the resources already consumed by other
+  /// in-flight tasks, reserving its weight when admitted — all under one lock so two trigger
+  /// threads (e.g. a notification delivery and a BGTask wake) can't both observe the same
+  /// usage, both pass admission, and overshoot the budget. Returns whether admitted.
+  private func tryAdmit(_ id: String, _ task: [String: Any], now: Int) -> Bool {
+    let currentBudget = budget // snapshot before taking runningLock (avoids nested locks)
+    let weight = TaskMapper.weightOf(task)
+    let weighted = TaskMapper.weightedTask(task, now: now)
     runningLock.lock(); defer { runningLock.unlock() }
     var cpu = 0.0, network = 0.0, battery = 0.0, memory = 0.0, count = 0
-    for (id, w) in running where id != excludeId {
+    for (rid, w) in running where rid != id {
       cpu += w.cpu; network += w.network; battery += w.battery; memory += w.memory; count += 1
     }
-    return (count, ResourceWeight(cpu: cpu, network: network, battery: battery, memory: memory))
+    let used = ResourceWeight(cpu: cpu, network: network, battery: battery, memory: memory)
+    guard WeightEngine.admit(currentBudget, [weighted], running: count, used: used).admitted.contains(id)
+    else { return false }
+    running[id] = weight
+    return true
   }
 
   public func definition() -> ModuleDefinition {
@@ -136,8 +154,10 @@ public class ExpoConductorModule: Module {
   func runDueBackgroundTasks() -> Int {
     let now = nowMs()
     let due = store.all().filter { Self.isDue($0, now: now) }
-    for task in due { dispatch(task, manual: false) }
-    return due.count
+    // Count tasks actually fired, not merely due (policy/budget can skip some).
+    var fired = 0
+    for task in due where dispatch(task, manual: false) { fired += 1 }
+    return fired
   }
 
   private static func isDue(_ task: [String: Any], now: Int) -> Bool {
@@ -235,27 +255,26 @@ public class ExpoConductorModule: Module {
 
   // MARK: - dispatch
 
-  /// Called by triggers (notification delivery, background refresh, remote push).
-  func dispatch(_ task: [String: Any], manual: Bool, data: [String: Any] = [:]) {
-    guard let id = task["id"] as? String else { return }
+  /// Called by triggers (notification delivery, background refresh, remote push). Returns
+  /// whether the task actually fired (emitted onTaskExecute) — false when skipped by policy or
+  /// budget — so [runDueBackgroundTasks] can report the number truly fired.
+  @discardableResult
+  func dispatch(_ task: [String: Any], manual: Bool, data: [String: Any] = [:]) -> Bool {
+    guard let id = task["id"] as? String else { return false }
     let now = nowMs()
 
     if !manual {
       let decision = PolicyEngine.evaluate(TaskMapper.constraints(task), DeviceInfo.read(now: now))
       if !decision.eligible {
         emit("onTaskSkipped", ["taskId": id, "reason": decision.reason.rawValue])
-        return
+        return false
       }
-      // Admit against the budget/count consumed by other in-flight tasks in this process.
-      let usage = runningUsage(excluding: id)
-      let admission = WeightEngine.admit(
-        budget, [TaskMapper.weightedTask(task, now: now)], running: usage.0, used: usage.1
-      )
-      if !admission.admitted.contains(id) {
+      // Admit against the budget/count consumed by other in-flight tasks in this process
+      // (atomic check-then-reserve, see tryAdmit).
+      if !tryAdmit(id, task, now: now) {
         emit("onTaskSkipped", ["taskId": id, "reason": "DEFERRED_BY_BUDGET"])
-        return
+        return false
       }
-      markRunning(id, TaskMapper.weightOf(task))
     }
 
     let handler = task["handler"] as? [String: Any]
@@ -277,6 +296,7 @@ public class ExpoConductorModule: Module {
     }
 
     advanceRecurrence(task)
+    return true
   }
 
   private func advanceRecurrence(_ task: [String: Any]) {

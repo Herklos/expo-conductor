@@ -29,6 +29,18 @@ describe('normalize', () => {
     expect(task.recurrence).toEqual({ kind: 'interval', everyMs: 1000 });
     expect(task.nextRunAt).toBe(1000);
   });
+
+  it('rejects a malformed cron expression at registration (fail fast, not a silent never-fire)', () => {
+    // The engine is total (returns null) for parity; the normalize boundary is where a typo
+    // must surface, so registering a bad cron throws instead of registering a dead task.
+    const bad = (expression: string) =>
+      normalize({ id: 'c', triggers: [{ type: 'recurrence', recurrence: { kind: 'cron', expression } }] }, 0);
+    expect(() => bad('* *')).toThrow(/Invalid cron/); // too few fields
+    expect(() => bad('30 9 * extra')).toThrow(/Invalid cron/); // too many fields
+    expect(() => bad('30abc 9 *')).toThrow(/Invalid cron/); // non-numeric token
+    // A valid cron still normalizes fine.
+    expect(() => bad('*/15 * *')).not.toThrow();
+  });
 });
 
 describe('computeNextRunAt', () => {

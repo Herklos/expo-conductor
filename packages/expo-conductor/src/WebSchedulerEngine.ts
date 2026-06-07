@@ -166,8 +166,12 @@ export class WebSchedulerEngine implements ConductorBackend {
         if (ad !== bd) return ad - bd;
         return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
       });
-    for (const task of due) this.fire(task, false);
-    return due.length;
+    // Count tasks actually FIRED, not merely due: a task can be skipped here by single-flight,
+    // policy, or budget without emitting onTaskExecute. The public contract documents this
+    // return as "number of tasks fired".
+    let fired = 0;
+    for (const task of due) if (this.fire(task, false)) fired += 1;
+    return fired;
   }
 
   async setResourceBudgetAsync(budget: ResourceBudget): Promise<void> {
@@ -293,8 +297,9 @@ export class WebSchedulerEngine implements ConductorBackend {
 
   /** Fire a task: enforce single-flight + policy + budget, then emit execute, then
    *  reschedule. `firedBy` overrides the reported trigger type (e.g. an `appState` fire of
-   *  a task whose first trigger is a recurrence). */
-  private fire(task: RegisteredTask, manual: boolean, firedBy?: TriggerType): void {
+   *  a task whose first trigger is a recurrence). Returns whether the task actually fired
+   *  (emitted onTaskExecute) — false when skipped by single-flight, policy or budget. */
+  private fire(task: RegisteredTask, manual: boolean, firedBy?: TriggerType): boolean {
     const now = this.now();
     const ctx: DeviceContext = { ...this.deviceContext(), now };
 
@@ -309,14 +314,14 @@ export class WebSchedulerEngine implements ConductorBackend {
         // single-flight exists to prevent (see policy.singleFlight docs).
         if (isReplayableOnHandoff(task)) this.deferredByLeader.add(task.id);
         this.reschedule(task, now);
-        return;
+        return false;
       }
 
       const decision = evaluate(task.policy.constraints ?? {}, ctx);
       if (!decision.eligible) {
         this.emit('onTaskSkipped', { taskId: task.id, reason: decision.reason });
         this.reschedule(task, now);
-        return;
+        return false;
       }
 
       const candidate: WeightedTask = {
@@ -334,7 +339,7 @@ export class WebSchedulerEngine implements ConductorBackend {
         // occurrence (a one-shot has no future trigger to reschedule onto).
         this.emit('onTaskSkipped', { taskId: task.id, reason: 'DEFERRED_BY_BUDGET' });
         this.deferRetry(task, now);
-        return;
+        return false;
       }
       // Mark running until the handler reports a result (drives cross-task budgeting).
       this.running.set(task.id, task.weight);
@@ -363,6 +368,7 @@ export class WebSchedulerEngine implements ConductorBackend {
       firedAt: now,
       attempt,
     });
+    return true;
   }
 
   private reschedule(task: RegisteredTask, now: number): void {

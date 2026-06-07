@@ -123,6 +123,11 @@ are de-duplicated to a single transition.
 { kind: 'cron',     expression: '30 9 *' /* minute hour dayOfWeek */ }
 ```
 
+A cron `expression` is exactly three whitespace-separated fields (`minute hour dayOfWeek`),
+each `*`, `*/<n>`, or a comma list of integers. An invalid expression is rejected when the
+task is scheduled (so a typo surfaces immediately rather than silently never firing). The
+three engines parse cron identically (ASCII-whitespace separators, strict integer tokens).
+
 ### Priority & resource weight
 
 The engine **orders by priority** (higher first, then earliest-due, then id) and
@@ -376,10 +381,12 @@ The `push` trigger only matches tasks that declare a `push` trigger with a match
   (there is no live JS runtime). Use a **native** handler (`handler.type: 'native'`,
   registered with `ExpoConductorModule.registerHandler`) for work that must run while the
   app is killed; JS handlers run when the app is foregrounded/backgrounded but alive.
-- **Android exact alarms** require the `SCHEDULE_EXACT_ALARM`/`USE_EXACT_ALARM` permissions
-  (added by the plugin when `enableExactAlarms` is set); on Android 14+ the user may need
-  to grant them, and the module falls back to an inexact allow-while-idle alarm if the
-  permission isn’t granted.
+- **Android exact alarms** use `SCHEDULE_EXACT_ALARM` (added by the plugin when
+  `enableExactAlarms` is set — the default); on Android 14+ the user may need to grant it, and
+  the module falls back to an inexact allow-while-idle alarm if it isn’t granted. The
+  non-revocable `USE_EXACT_ALARM` is **Google-Play-restricted** to alarm-clock/calendar/reminder
+  apps and is **not** shipped by default — opt in with the plugin’s `useExactAlarmClock` flag
+  only if your app qualifies, or Play may reject the build.
 - **`Conductor.getStatus()`** reports whether background execution is permitted
   (`available` / `restricted` / `unsupported`) — e.g. `restricted` when iOS Background App
   Refresh is off or the Android app is background-restricted.

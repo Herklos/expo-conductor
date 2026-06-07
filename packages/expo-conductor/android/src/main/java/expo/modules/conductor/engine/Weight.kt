@@ -26,9 +26,11 @@ object WeightEngine {
 
   private val taskComparator: Comparator<Task> = Comparator { a, b ->
     when {
-      a.priority != b.priority -> b.priority - a.priority
+      // compareTo, not subtraction: b.priority - a.priority overflows Int for far-apart
+      // priorities and would flip the order (and break TimSort's contract).
+      a.priority != b.priority -> b.priority.compareTo(a.priority)
       a.dueAt != b.dueAt -> a.dueAt.compareTo(b.dueAt)
-      else -> a.id.compareTo(b.id)
+      else -> a.id.compareTo(b.id) // UTF-16 code-unit order (matches JS/Swift)
     }
   }
 
