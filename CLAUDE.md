@@ -1,0 +1,98 @@
+# CLAUDE.md
+
+Guidance for working in this repository.
+
+## What this is
+
+`expo-conductor` — an Expo native module that lets an app define tasks with rich
+**execution policies** (time windows, charging/battery/network/idle constraints, expiry,
+retry/backoff), **resource weight** (cpu/network/battery/memory budgeting), **priority vs.
+other tasks**, and **recurrence** (interval/daily/weekly/cron), fired by many **triggers**
+(time, recurrence, scheduled notification, exact alarm, OS background task, FCM/APNs push,
+app-state). A task's work runs as a **JS handler or an app-provided native handler**.
+
+It is a **pnpm monorepo**:
+- `packages/expo-conductor/` — the module
+- `apps/demo/` — an Expo app exercising every feature
+- `fixtures/` — shared cross-platform behavior cases (see "The big idea")
+
+## The big idea: native-first + one shared fixture set
+
+The orchestration **engine** is implemented **three times** — Kotlin (Android), Swift (iOS),
+TypeScript (Web) — because the logic must live natively. To guarantee the three behave
+**identically**, they are all tested against the SAME language-neutral fixtures in
+`/fixtures/*.cases.json`. Every platform's test suite loads those exact files:
+
+| Concern | Fixture | TS (Jest) | Kotlin (JUnit) | Swift (XCTest) |
+| --- | --- | --- | --- | --- |
+| recurrence | `recurrence.cases.json` | `src/__tests__/recurrence.test.ts` | `android/engine-jvm/.../EngineFixtureTest.kt` | `ios/Tests/EngineFixtureTests.swift` |
+| priority | `priority.cases.json` | ✅ | ✅ | ✅ |
+| weight admission | `weight-admission.cases.json` | ✅ | ✅ | ✅ |
+| policy | `policy.cases.json` | ✅ | ✅ | ✅ |
+
+**Rule of thumb:** if you change engine behavior, change it in **all three** engines AND
+update the fixtures. The TS engine in `src/web/engine/` is the reference implementation;
+Kotlin (`android/src/main/java/expo/modules/conductor/engine/`) and Swift (`ios/Engine/`)
+mirror it line-for-line. Time math is integer math on UTC epoch ms; weights are IEEE-754
+`double` compared with a **strict `<=`** (no epsilon — it would diverge across platforms).
+
+## Layout of `packages/expo-conductor`
+
+```
+src/
+  ExpoConductor.types.ts     # the serializable task model (single source of truth for types)
+  ExpoConductorModule.ts     # native proxy: requireNativeModule('ExpoConductorModule')
+  ExpoConductorModule.web.ts # web module wrapping WebSchedulerEngine
+  WebSchedulerEngine.ts      # timer-driven web backend (ConductorBackend impl, no 'expo' import)
+  ConductorBackend.ts        # interface every platform backend implements
+  Conductor.ts               # ConductorClient: public API, JS handler registry + dispatch
+  index.ts                   # default singleton `Conductor`
+  web/engine/*.ts            # reference engine (recurrence/priority/weight/policy/registry)
+  web/normalize.ts           # TaskDefinition -> RegisteredTask (+ nextRunAt)
+  __tests__/*.test.ts        # Jest; fixtures.ts loads /fixtures
+android/  src/main/java/expo/modules/conductor/{engine,triggers,storage}/  + engine-jvm/ (JVM test harness)
+ios/      Engine/, Triggers/, *.swift, Package.swift (SwiftPM test target), ExpoConductor.podspec
+plugin/   src/index.ts       # config plugin (permissions, manifest, BGTask ids, FCM gate)
+```
+
+## Commands
+
+```sh
+pnpm install
+pnpm --filter expo-conductor test         # Jest (engine + orchestration + API)
+pnpm --filter expo-conductor typecheck    # tsc for src + plugin
+pnpm --filter expo-conductor build        # emits build/ and plugin/build/
+pnpm test:kotlin                          # Kotlin engine vs shared fixtures (needs JDK 17+)
+pnpm test:swift                           # Swift engine vs shared fixtures (macOS / Swift)
+pnpm --filter demo typecheck
+pnpm --filter demo prebuild && pnpm --filter demo android   # run demo on device
+```
+
+The Kotlin tests run via a **standalone JVM-Gradle harness** (`android/engine-jvm/`) that
+compiles only the pure engine — no Android SDK/emulator needed. Swift tests run via a
+**SwiftPM package** (`ios/Package.swift`) — no Xcode project needed. Full native *app*
+builds need the Android SDK / Xcode (not required for engine verification).
+
+## Conventions & gotchas
+
+- **Jest matches `**/__tests__/**/*.test.ts` only.** Tests must not import `expo` (the
+  module proxy/web module files do). Test the engines / `WebSchedulerEngine` / `ConductorClient`
+  (with a mock backend) directly — that is why `WebSchedulerEngine` has no `expo` import.
+- **Handlers are keyed by name, tasks by id.** Several tasks can share one handler, so
+  `ConductorClient` maps `taskId -> handlerName` (populated in `schedule`/`defineTaskDefinition`)
+  before dispatching `onTaskExecute`. Don't reintroduce a direct `handlers.get(taskId)`.
+- **Events cross threads on Android** — emit via the main-thread helper in
+  `ExpoConductorModule.kt`, never call `sendEvent` directly from a Worker/Receiver.
+- **Kotlin uses nested block comments**: a `/*` inside a KDoc (e.g. writing `a/*b`) opens a
+  nested comment. Avoid `/` immediately followed by `*` in doc comments.
+- **Publishing**: the `files` allowlist in `package.json` is explicit (plus `.npmignore`) so
+  the JVM/Swift test harnesses and build artifacts are NOT shipped. If you add native source
+  dirs, update `files`.
+- **Versions**: Expo ~56, React 19, RN 0.85. Keep `@types/react` on 19.x.
+
+## Git / branches
+
+Development branch for sessions: `claude/zen-newton-0MGqO`. `master` exists at the same
+commit. The local git remote only accepts pushes to the session branch; use the GitHub MCP
+tools to operate on other branches (e.g. `master`). Do not push to other branches without
+explicit permission.
