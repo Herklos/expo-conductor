@@ -101,12 +101,20 @@ object TaskMapper {
 
   fun weightedTask(task: JSONObject): WeightEngine.Task {
     val w = task.getJSONObject("weight")
+    val maxConcurrent = task.optJSONObject("policy")
+      ?.let { if (it.has("maxConcurrent")) it.getInt("maxConcurrent") else null }
     return WeightEngine.Task(
       task.getString("id"),
       task.optInt("priority", 0),
       if (task.isNull("nextRunAt")) System.currentTimeMillis() else task.optLong("nextRunAt"),
       ResourceWeight(w.getDouble("cpu"), w.getDouble("network"), w.getDouble("battery"), w.getDouble("memory")),
+      maxConcurrent,
     )
+  }
+
+  fun weightOf(task: JSONObject): ResourceWeight {
+    val w = task.getJSONObject("weight")
+    return ResourceWeight(w.getDouble("cpu"), w.getDouble("network"), w.getDouble("battery"), w.getDouble("memory"))
   }
 
   fun computeNextRunAt(task: JSONObject, recurrence: Recurrence?, now: Long): Long? {

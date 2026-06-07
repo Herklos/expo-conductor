@@ -10,6 +10,7 @@ object WeightEngine {
     val priority: Int,
     val dueAt: Long,
     val weight: ResourceWeight,
+    val maxConcurrent: Int? = null,
   )
 
   data class Admission(val admitted: List<String>, val deferred: List<String>)
@@ -31,27 +32,39 @@ object WeightEngine {
     }
   }
 
-  /** Skip-over greedy admission ordered by the priority comparator. */
-  fun admit(budget: ResourceWeight, tasks: List<Task>): Admission {
+  /**
+   * Skip-over greedy admission ordered by the priority comparator, honoring per-task
+   * `maxConcurrent` and the budget/count already consumed by in-flight tasks
+   * ([used]/[running]).
+   */
+  fun admit(
+    budget: ResourceWeight,
+    tasks: List<Task>,
+    running: Int = 0,
+    used: ResourceWeight? = null,
+  ): Admission {
     val ordered = tasks.sortedWith(taskComparator)
-    var cpu = 0.0
-    var network = 0.0
-    var battery = 0.0
-    var memory = 0.0
+    var cpu = used?.cpu ?: 0.0
+    var network = used?.network ?: 0.0
+    var battery = used?.battery ?: 0.0
+    var memory = used?.memory ?: 0.0
+    var count = running
     val admitted = mutableListOf<String>()
     val deferred = mutableListOf<String>()
 
     for (task in ordered) {
       val w = task.weight
-      val fits = cpu + w.cpu <= budget.cpu &&
+      val fitsBudget = cpu + w.cpu <= budget.cpu &&
         network + w.network <= budget.network &&
         battery + w.battery <= budget.battery &&
         memory + w.memory <= budget.memory
-      if (fits) {
+      val fitsConcurrency = task.maxConcurrent == null || count + 1 <= task.maxConcurrent
+      if (fitsBudget && fitsConcurrency) {
         cpu += w.cpu
         network += w.network
         battery += w.battery
         memory += w.memory
+        count += 1
         admitted.add(task.id)
       } else {
         deferred.add(task.id)

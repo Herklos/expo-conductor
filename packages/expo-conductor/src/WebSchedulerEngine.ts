@@ -16,6 +16,7 @@ import {
   type ExpoConductorModuleEvents,
   type RegisteredTask,
   type ResourceBudget,
+  type ResourceWeight,
   type TaskDefinition,
   TaskResult,
   type Trigger,
@@ -50,12 +51,16 @@ export interface WebSchedulerOptions {
   /** Injectable timer setters for deterministic tests. */
   setTimer?: (cb: () => void, ms: number) => unknown;
   clearTimer?: (handle: unknown) => void;
+  /** Delay before retrying a task deferred by the resource budget (default 60s). */
+  deferRetryMs?: number;
 }
 
 export class WebSchedulerEngine implements ConductorBackend {
   private registry = new TaskRegistry();
   private timers = new Map<string, unknown>();
   private attempts = new Map<string, number>();
+  /** Weight of tasks currently executing (id -> weight), for cross-task budgeting. */
+  private running = new Map<string, ResourceWeight>();
   private budget: ResourceBudget = DEFAULT_BUDGET;
   private paused = false;
   private readonly listeners: Listeners = {
@@ -69,6 +74,7 @@ export class WebSchedulerEngine implements ConductorBackend {
   private readonly setTimer: (cb: () => void, ms: number) => unknown;
   private readonly clearTimer: (handle: unknown) => void;
   private readonly deviceContext: () => Omit<DeviceContext, 'now'>;
+  private readonly deferRetryMs: number;
 
   constructor(options: WebSchedulerOptions = {}) {
     this.now = options.now ?? (() => Date.now());
@@ -77,6 +83,7 @@ export class WebSchedulerEngine implements ConductorBackend {
     this.clearTimer =
       options.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
     this.deviceContext = options.deviceContext ?? (() => DEFAULT_CONTEXT);
+    this.deferRetryMs = options.deferRetryMs ?? 60_000;
     // Re-arm timers for tasks restored from persistence (otherwise web persistence is
     // write-only — tasks survive reload but never fire). A task whose nextRunAt is already
     // past will fire on the next tick (catch-up).
@@ -97,6 +104,7 @@ export class WebSchedulerEngine implements ConductorBackend {
   async cancelTaskAsync(id: string): Promise<boolean> {
     this.clearTimerFor(id);
     this.attempts.delete(id);
+    this.running.delete(id);
     return this.registry.remove(id);
   }
 
@@ -141,6 +149,8 @@ export class WebSchedulerEngine implements ConductorBackend {
   }
 
   async reportResultAsync(id: string, result: TaskResult, error?: string): Promise<void> {
+    // No longer occupies a concurrency/budget slot.
+    this.running.delete(id);
     const task = this.registry.get(id);
     if (!task) return;
     const triggerType = task.triggers[0]?.type ?? 'time';
@@ -228,13 +238,20 @@ export class WebSchedulerEngine implements ConductorBackend {
         priority: task.priority,
         dueAt: task.nextRunAt ?? now,
         weight: task.weight,
+        maxConcurrent: task.policy.maxConcurrent,
       };
-      const { admitted } = admit(this.budget, [candidate]);
+      // Admit against the budget/count already consumed by other in-flight tasks, so a
+      // task yields when the device is busy with heavier or more important work.
+      const { admitted } = admit(this.budget, [candidate], this.runningUsage(task.id));
       if (!admitted.includes(task.id)) {
+        // Budget/concurrency deferral is transient — retry shortly rather than dropping the
+        // occurrence (a one-shot has no future trigger to reschedule onto).
         this.emit('onTaskSkipped', { taskId: task.id, reason: 'DEFERRED_BY_BUDGET' });
-        this.reschedule(task, now);
+        this.deferRetry(task, now);
         return;
       }
+      // Mark running until the handler reports a result (drives cross-task budgeting).
+      this.running.set(task.id, task.weight);
     }
 
     // Schedule the next occurrence first, so that if the handler reports a
@@ -265,6 +282,28 @@ export class WebSchedulerEngine implements ConductorBackend {
     const updated: RegisteredTask = { ...task, nextRunAt: next };
     this.registry.upsert(updated);
     this.scheduleTimer(updated);
+  }
+
+  /** Re-arm a task that was deferred by the resource budget, after a short delay. */
+  private deferRetry(task: RegisteredTask, now: number): void {
+    const updated: RegisteredTask = { ...task, nextRunAt: now + this.deferRetryMs };
+    this.registry.upsert(updated);
+    this.scheduleTimer(updated);
+  }
+
+  /** Budget + count consumed by other in-flight tasks (excluding `excludeId`). */
+  private runningUsage(excludeId: string): { running: number; used: ResourceWeight } {
+    const used: ResourceWeight = { cpu: 0, network: 0, battery: 0, memory: 0 };
+    let running = 0;
+    for (const [id, weight] of this.running) {
+      if (id === excludeId) continue;
+      used.cpu += weight.cpu;
+      used.network += weight.network;
+      used.battery += weight.battery;
+      used.memory += weight.memory;
+      running += 1;
+    }
+    return { running, used };
   }
 
   private handleRetry(task: RegisteredTask): void {

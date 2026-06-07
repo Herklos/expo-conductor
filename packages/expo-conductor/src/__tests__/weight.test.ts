@@ -1,4 +1,4 @@
-import type { ResourceBudget } from '../ExpoConductor.types';
+import type { ResourceBudget, ResourceWeight } from '../ExpoConductor.types';
 import { admit, resolveWeight, type WeightedTask } from '../web/engine/weight';
 import { loadFixture } from './fixtures';
 
@@ -6,6 +6,8 @@ interface AdmissionCase {
   name: string;
   budget: ResourceBudget;
   tasks: WeightedTask[];
+  running?: number;
+  used?: Partial<ResourceWeight>;
   expected: { admitted: string[]; deferred: string[] };
 }
 
@@ -13,7 +15,7 @@ const { cases } = loadFixture<{ cases: AdmissionCase[] }>('weight-admission.case
 
 describe('weight.admit (shared fixtures)', () => {
   it.each(cases.map((c) => [c.name, c] as const))('%s', (_name, c) => {
-    expect(admit(c.budget, c.tasks)).toEqual(c.expected);
+    expect(admit(c.budget, c.tasks, { running: c.running, used: c.used })).toEqual(c.expected);
   });
 });
 

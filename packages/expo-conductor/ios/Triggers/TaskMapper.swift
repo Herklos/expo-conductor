@@ -108,12 +108,18 @@ enum TaskMapper {
   }
 
   static func weightedTask(_ task: [String: Any], now: Int) -> WeightEngine.Task {
-    WeightEngine.Task(
+    let maxConcurrent = (task["policy"] as? [String: Any]).flatMap { int($0["maxConcurrent"]) }
+    return WeightEngine.Task(
       id: (task["id"] as? String) ?? "",
       priority: int(task["priority"]) ?? 0,
       dueAt: int(task["nextRunAt"]) ?? now,
-      weight: weight(task["weight"])
+      weight: weight(task["weight"]),
+      maxConcurrent: maxConcurrent
     )
+  }
+
+  static func weightOf(_ task: [String: Any]) -> ResourceWeight {
+    weight(task["weight"])
   }
 
   static func computeNextRunAt(_ task: [String: Any], _ recurrence: Recurrence?, _ now: Int) -> Int? {

@@ -20,6 +20,8 @@ export function resolveWeight(weight: ResourceWeight | WeightPreset): ResourceWe
 
 export interface WeightedTask extends Prioritizable {
   weight: ResourceWeight;
+  /** Max number of tasks allowed to run simultaneously when this task is admitted. */
+  maxConcurrent?: number;
 }
 
 export interface AdmissionResult {
@@ -27,23 +29,44 @@ export interface AdmissionResult {
   deferred: string[];
 }
 
+/** Resources already consumed by, and count of, tasks currently running. */
+export interface AdmissionOptions {
+  running?: number;
+  used?: Partial<ResourceWeight>;
+}
+
 const DIMENSIONS: (keyof ResourceWeight)[] = ['cpu', 'network', 'battery', 'memory'];
 
 /**
- * Greedily admit tasks (highest priority first) while every weight dimension
- * stays within `budget`. A task that does not fit is deferred, but later, smaller
- * tasks are still considered (skip-over greedy).
+ * Greedily admit tasks (highest priority first) while every weight dimension stays within
+ * `budget` AND the simultaneous-run count stays within each task's `maxConcurrent`. Budget
+ * and count already consumed by in-flight tasks are supplied via `options` (used/running),
+ * so a task yields when the device is already busy with heavier or more important work.
+ * A task that does not fit is deferred, but later, smaller tasks are still considered
+ * (skip-over greedy).
  */
-export function admit(budget: ResourceBudget, tasks: WeightedTask[]): AdmissionResult {
+export function admit(
+  budget: ResourceBudget,
+  tasks: WeightedTask[],
+  options: AdmissionOptions = {},
+): AdmissionResult {
   const ordered = [...tasks].sort(compare);
-  const used: ResourceWeight = { cpu: 0, network: 0, battery: 0, memory: 0 };
+  const used: ResourceWeight = {
+    cpu: options.used?.cpu ?? 0,
+    network: options.used?.network ?? 0,
+    battery: options.used?.battery ?? 0,
+    memory: options.used?.memory ?? 0,
+  };
+  let count = options.running ?? 0;
   const admitted: string[] = [];
   const deferred: string[] = [];
 
   for (const task of ordered) {
-    const fits = DIMENSIONS.every((d) => used[d] + task.weight[d] <= budget[d]);
-    if (fits) {
+    const fitsBudget = DIMENSIONS.every((d) => used[d] + task.weight[d] <= budget[d]);
+    const fitsConcurrency = task.maxConcurrent == null || count + 1 <= task.maxConcurrent;
+    if (fitsBudget && fitsConcurrency) {
       for (const d of DIMENSIONS) used[d] += task.weight[d];
+      count += 1;
       admitted.push(task.id);
     } else {
       deferred.push(task.id);
