@@ -117,6 +117,24 @@ export class WebSchedulerEngine implements ConductorBackend {
     if (task) this.fire(task, true);
   }
 
+  async runDueTasksAsync(): Promise<number> {
+    if (this.paused) return 0;
+    const now = this.now();
+    // Fire highest-priority-first so the shared budget is allocated fairly.
+    const due = this.registry
+      .all()
+      .filter((t) => t.nextRunAt != null && t.nextRunAt <= now)
+      .sort((a, b) => {
+        if (a.priority !== b.priority) return b.priority - a.priority;
+        const ad = a.nextRunAt ?? 0;
+        const bd = b.nextRunAt ?? 0;
+        if (ad !== bd) return ad - bd;
+        return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+      });
+    for (const task of due) this.fire(task, false);
+    return due.length;
+  }
+
   async setResourceBudgetAsync(budget: ResourceBudget): Promise<void> {
     this.budget = budget;
   }

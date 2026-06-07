@@ -77,6 +77,10 @@ public class ExpoConductorModule: Module {
       self.dispatch(task, manual: true)
     }
 
+    AsyncFunction("runDueTasksAsync") { [weak self] () -> Int in
+      self?.runDueBackgroundTasks() ?? 0
+    }
+
     AsyncFunction("setResourceBudgetAsync") { [weak self] (budget: [String: Any]) in
       self?.budget = TaskMapper.weight(budget)
     }
@@ -126,12 +130,14 @@ public class ExpoConductorModule: Module {
     DispatchQueue.main.async { [weak self] in self?.sendEvent(name, payload) }
   }
 
-  /// Run every task that is currently due (used by the BGTask launch handler).
-  func runDueBackgroundTasks() {
+  /// Run every task that is currently due (used by the BGTask launch handler). Returns the
+  /// number of tasks fired.
+  @discardableResult
+  func runDueBackgroundTasks() -> Int {
     let now = nowMs()
-    for task in store.all() where Self.isDue(task, now: now) {
-      dispatch(task, manual: false)
-    }
+    let due = store.all().filter { Self.isDue($0, now: now) }
+    for task in due { dispatch(task, manual: false) }
+    return due.count
   }
 
   private static func isDue(_ task: [String: Any], now: Int) -> Bool {

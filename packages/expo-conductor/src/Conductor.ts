@@ -109,6 +109,15 @@ export class ConductorClient {
     return this.backend.runTaskAsync(id);
   }
 
+  /**
+   * Run every currently-due task through the normal admission/dispatch path. Intended for
+   * a background tick (see the optional `expo-background-task` integration) so one OS wake
+   * can drive the engine. Returns the number of tasks fired.
+   */
+  runDueTasks(): Promise<number> {
+    return this.backend.runDueTasksAsync();
+  }
+
   setResourceBudget(budget: ResourceBudget): Promise<void> {
     return this.backend.setResourceBudgetAsync(budget);
   }

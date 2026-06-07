@@ -4,6 +4,18 @@
   "description": "Define tasks in an Expo app with rich execution policies (time, notifications, FCM/push, alarms, background) — priority, resource weight, recurrence and constraints. Native-first engine on Android (Kotlin) and iOS (Swift) with a Web implementation.",
   "main": "build/index.js",
   "types": "build/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./build/index.d.ts",
+      "default": "./build/index.js"
+    },
+    "./task-manager": {
+      "types": "./build/integrations/expoBackgroundTask.d.ts",
+      "default": "./build/integrations/expoBackgroundTask.js"
+    },
+    "./app.plugin.js": "./app.plugin.js",
+    "./package.json": "./package.json"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json && tsc -p plugin/tsconfig.json",
     "build:plugin": "tsc -p plugin/tsconfig.json",
@@ -45,13 +57,21 @@
   ],
   "peerDependencies": {
     "expo": "*",
+    "expo-background-task": "*",
+    "expo-task-manager": "*",
     "react": "*",
     "react-native": "*"
+  },
+  "peerDependenciesMeta": {
+    "expo-background-task": { "optional": true },
+    "expo-task-manager": { "optional": true }
   },
   "devDependencies": {
     "@types/jest": "^29.5.12",
     "@types/react": "~19.2.0",
+    "expo-background-task": "*",
     "expo-modules-core": "*",
+    "expo-task-manager": "*",
     "jest": "^29.7.0",
     "ts-jest": "^29.2.5",
     "typescript": "~5.8.3"

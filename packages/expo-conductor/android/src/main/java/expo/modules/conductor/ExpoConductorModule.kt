@@ -74,6 +74,17 @@ class ExpoConductorModule : Module() {
       store.get(id)?.let { dispatch(it, manual = true) }
     }
 
+    AsyncFunction("runDueTasksAsync") {
+      val now = System.currentTimeMillis()
+      val due = store.all()
+        .filter { !it.isNull("nextRunAt") && it.optLong("nextRunAt") <= now }
+        .sortedWith(compareByDescending<org.json.JSONObject> { it.optInt("priority", 0) }
+          .thenBy { it.optLong("nextRunAt") }
+          .thenBy { it.optString("id") })
+      due.forEach { dispatch(it, manual = false) }
+      due.size
+    }
+
     AsyncFunction("setResourceBudgetAsync") { budget: Map<String, Any?> ->
       resourceBudget = TaskMapper.weight(budget)
     }
