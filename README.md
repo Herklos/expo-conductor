@@ -173,17 +173,37 @@ Conductor.defineTask('refresh-feed', async (ctx) => TaskResult.NEW_DATA);
 
 ```kotlin
 // Android native handler — runs without spinning up JS (more reliable in background).
-ExpoConductorModule.registerHandler("refresh-feed") { taskId, data -> "success" }
+// Register early (e.g. in Application.onCreate). Return one of:
+// "success" | "failed" | "newData" | "noData".
+ExpoConductorModule.registerHandler("refresh-feed") { taskId, data ->
+  // ...do the work synchronously...
+  "success"
+}
 ```
 
 ```swift
-// iOS native handler.
-ExpoConductorModule.registerHandler(name: "refresh-feed") { taskId, data in "success" }
+// iOS native handler — runs on the native side without crossing into JS.
+// Register early (e.g. in your AppDelegate `application(_:didFinishLaunchingWithOptions:)`
+// or any module init that runs at launch) so the handler exists when a trigger fires.
+// The closure signature is `(_ taskId: String, _ data: [String: Any]) -> String`
+// and must return one of: "success" | "failed" | "newData" | "noData".
+import ExpoConductor
+
+ExpoConductorModule.registerHandler(name: "refresh-feed") { taskId, data in
+  // `data` carries the trigger payload (e.g. the remote push `data` dictionary).
+  // Do the work, then report the outcome:
+  return "newData"
+}
+
+// Remove it later if needed:
+ExpoConductorModule.unregisterHandler(name: "refresh-feed")
 ```
 
-Set `handler: { name, type: 'native' }` on the definition to dispatch to a native
-handler. If a JS handler is unavailable at fire time (e.g. the process was killed) and a
-native handler with the same name exists, the engine uses the native one.
+Set `handler: { name, type: 'native' }` on the task definition to dispatch to a native
+handler. The `name` must match the string you registered. If a JS handler is unavailable at
+fire time (e.g. the process was killed) and a native handler with the same name exists, the
+engine uses the native one. Native handlers should return quickly and respect background
+execution limits — for long work, kick off your own bounded task and return promptly.
 
 ## API
 
