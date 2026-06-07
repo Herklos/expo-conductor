@@ -51,7 +51,9 @@ public class ConductorAppDelegate: ExpoAppDelegateSubscriber {
       completionHandler(.noData)
       return
     }
-    let data = userInfo as? [String: Any] ?? [:]
+    // Pass the custom payload to handlers, minus the APNs internal `aps` envelope.
+    var data = userInfo as? [String: Any] ?? [:]
+    data.removeValue(forKey: "aps")
     if let module = ExpoConductorModule.shared {
       module.dispatch(task, manual: false, data: data)
     } else {

@@ -150,6 +150,16 @@ object TaskMapper {
 
   fun primaryTriggerType(task: JSONObject): String = triggerTypes(task).firstOrNull() ?: "time"
 
+  /** The `notification` trigger object, if this task has one (carries title/body). */
+  fun notificationTrigger(task: JSONObject): JSONObject? {
+    val triggers = task.optJSONArray("triggers") ?: return null
+    for (i in 0 until triggers.length()) {
+      val t = triggers.getJSONObject(i)
+      if (t.optString("type") == "notification") return t
+    }
+    return null
+  }
+
   private fun triggerTypes(task: JSONObject): List<String> {
     val triggers = task.optJSONArray("triggers") ?: return emptyList()
     return (0 until triggers.length()).map { triggers.getJSONObject(it).optString("type") }

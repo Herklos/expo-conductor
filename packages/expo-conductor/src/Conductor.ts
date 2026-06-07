@@ -30,6 +30,13 @@ export class ConductorClient {
   /**
    * Register a JS handler for a task. The first registration lazily wires the
    * `onTaskExecute` listener that dispatches to handlers.
+   *
+   * IMPORTANT: like `expo-task-manager`'s `defineTask`, call this at **module (global)
+   * scope** — not inside a React component, effect, or callback. When the OS relaunches
+   * the app headlessly to run a background/alarm/push task, no components mount, so a
+   * handler registered inside a component would be missing and the task would not run.
+   * For work that must run while the app is terminated, use a native handler instead
+   * (`handler.type: 'native'`).
    */
   defineTask(name: string, handler: JsTaskHandler): void {
     this.handlers.set(name, handler);
@@ -41,9 +48,20 @@ export class ConductorClient {
     this.handlers.delete(name);
   }
 
+  /** Whether a JS handler with this name is currently registered. */
+  isTaskDefined(name: string): boolean {
+    return this.handlers.has(name);
+  }
+
+  /** Names of all currently-registered JS handlers. */
+  getDefinedTaskNames(): string[] {
+    return [...this.handlers.keys()];
+  }
+
   /** Register (or replace) a task definition with the engine. */
   async defineTaskDefinition(definition: TaskDefinition): Promise<RegisteredTask> {
     this.taskHandlerNames.set(definition.id, definition.handler?.name ?? definition.id);
+    this.warnIfHandlerMissing(definition);
     return this.backend.registerTaskAsync(definition);
   }
 
@@ -54,7 +72,28 @@ export class ConductorClient {
       this.defineTask(name, handler);
     }
     this.taskHandlerNames.set(definition.id, name);
+    this.warnIfHandlerMissing(definition);
     return this.backend.registerTaskAsync(definition);
+  }
+
+  /**
+   * Warn when a task with a JS handler that can fire while the app is terminated has no
+   * handler registered — a strong signal the handler was defined in component scope.
+   */
+  private warnIfHandlerMissing(definition: TaskDefinition): void {
+    const type = definition.handler?.type ?? 'js';
+    if (type !== 'js') return;
+    const name = definition.handler?.name ?? definition.id;
+    if (this.handlers.has(name)) return;
+    const headlessCapable = definition.triggers.some(
+      (t) => t.type === 'background' || t.type === 'alarm' || t.type === 'push',
+    );
+    if (!headlessCapable) return;
+    console.warn(
+      `[expo-conductor] Task "${definition.id}" has a JS handler "${name}" that is not ` +
+        `registered, but can fire while the app is terminated. Register it at module scope ` +
+        `via Conductor.defineTask("${name}", fn), or use a native handler for headless work.`,
+    );
   }
 
   cancelTask(id: string): Promise<boolean> {

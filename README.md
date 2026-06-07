@@ -101,7 +101,7 @@ A task fires when **any** of its triggers fire. Supported trigger types:
 | --- | --- | --- | --- | --- |
 | `time` (at / inSeconds) | WorkManager | UNNotification | `setTimeout` | one-shot |
 | `recurrence` (interval/daily/weekly/cron) | Periodic WorkManager | BGTaskScheduler + notif | `setInterval` | repeating |
-| `notification` | NotificationManager | UNUserNotificationCenter | Notification API | user-visible |
+| `notification` | NotificationManagerCompat (auto channel) | UNUserNotificationCenter | timer only (no UI) | user-visible on iOS/Android |
 | `alarm` (exact) | AlarmManager (`setExactAndAllowWhileIdle`) | ⚠︎ notification fallback | `setTimeout` | exact wall-clock |
 | `background` (deferrable) | WorkManager | BGAppRefreshTask | Periodic Background Sync | OS-optimized |
 | `push` (FCM/APNs data message) | FirebaseMessagingService* | APNs remote-notification | — | server-driven |
@@ -167,7 +167,10 @@ If a constraint isn’t met when a task fires, it is **skipped** (with a reason 
 A task’s work can run as a **JS handler** or an **app-provided native handler**:
 
 ```ts
-// JS handler (runs in the JS runtime; headless on Android via TaskManager).
+// JS handler — register at MODULE (global) scope, not inside a component/effect, so it
+// survives a headless relaunch (same rule as expo-task-manager's defineTask). A JS handler
+// runs while the app is alive (incl. foreground/background); it does NOT run after the app
+// is terminated — use a native handler for that.
 Conductor.defineTask('refresh-feed', async (ctx) => TaskResult.NEW_DATA);
 ```
 
@@ -210,8 +213,10 @@ execution limits — for long work, kick off your own bounded task and return pr
 ```ts
 import Conductor from 'expo-conductor';
 
-Conductor.defineTask(name, handler)          // register a JS handler
+Conductor.defineTask(name, handler)          // register a JS handler (call at module scope!)
 Conductor.undefineTask(name)                 // remove a JS handler
+Conductor.isTaskDefined(name)                // is a JS handler registered? -> boolean
+Conductor.getDefinedTaskNames()              // names of registered JS handlers -> string[]
 await Conductor.schedule(def, handler?)      // register handler + task definition
 await Conductor.defineTaskDefinition(def)    // register a definition (handler registered separately)
 await Conductor.cancelTask(id)
@@ -261,8 +266,8 @@ background behavior on a device:
 - **iOS background refresh:** run from Xcode, pause in the debugger and call
   `e -l objc -- (void)[[BGTaskScheduler sharedScheduler] _simulateLaunchForTaskWithIdentifier:@"com.expoconductor.refresh"]`.
 - **Notifications:** schedule “Notification in 5s”, background the app, observe delivery.
-- **Push (FCM):** enable FCM in the plugin, send a data message with
-  `{ "conductorTask": "<matchKey>" }`.
+- **Push (FCM):** enable FCM in the plugin, send a **raw FCM v1 data-only** message (see
+  the Push message format section below — not via the Expo Push Service, which re-wraps data).
 
 See [`fixtures/README.md`](./fixtures/README.md) for the shared behavior contract.
 
@@ -284,17 +289,37 @@ requires permission:
 The `push` trigger only matches tasks that declare a `push` trigger with a matching
 `matchKey` (a forged message cannot trigger arbitrary tasks). Senders must use:
 
-- **Android (FCM):** a **data-only** message (`{ "data": { "conductorTask": "<matchKey>" } }`).
-  A `notification` payload is handled by the system tray and won't dispatch when backgrounded.
-- **iOS (APNs):** a **silent/background** push (`content-available: 1`,
-  `apns-push-type: background`, `apns-priority: 5`) carrying `conductorTask`. Background push
-  is throttled by iOS (~2–3/hr) and not guaranteed. Treat `data` passed to handlers as
-  untrusted input.
+- **Android (FCM):** a **raw FCM HTTP v1 data-only** message. `data` must be a flat
+  string→string map, read in `onMessageReceived`:
+  ```json
+  { "message": { "token": "<device-token>",
+                 "data": { "conductorTask": "<matchKey>" },
+                 "android": { "priority": "high" } } }
+  ```
+  Send it directly to FCM v1 (with a service-account credential) — **not** via the Expo Push
+  Service, which wraps custom data in its own envelope so `data.conductorTask` won't be at the
+  top level. A `notification` payload is handled by the system tray and won't dispatch.
+- **iOS (APNs):** a **silent/background** push (`apns-push-type: background`,
+  `apns-priority: 5`) with `conductorTask` as a **top-level peer of `aps`**, and the app must
+  have called `registerForRemoteNotifications()` (e.g. via `expo-notifications`):
+  ```json
+  { "aps": { "content-available": 1 }, "conductorTask": "<matchKey>" }
+  ```
+  Background push is throttled by iOS (~2–3/hr) and not guaranteed — don't use it for
+  time-critical or high-frequency work. The `aps` envelope is stripped before handler `data`.
+- A push task that must run while the app is **terminated** needs a **native** handler
+  (`handler.type: 'native'`); a JS handler only runs while the app is alive. Treat all push
+  `data` as untrusted input.
 
 ## Platform support & limitations
 
 - **iOS has no exact-alarm API.** `alarm` triggers fall back to a scheduled local
   notification; exact wall-clock wakeups aren’t guaranteed by the OS.
+- **iOS `time`/`alarm` are user-visible:** the only reliable way to wake at a wall-clock
+  time on iOS is a local notification, so `time` and `alarm` triggers surface a notification
+  banner there. On Android these run as silent WorkManager/alarm jobs. (Only the
+  `notification` trigger is intended to be user-visible on both platforms — on Android it
+  posts via a `NotificationManagerCompat` channel the module creates automatically.)
 - **iOS background execution** is opportunistic (BGTaskScheduler decides timing); minimum
   intervals are advisory, and **background tasks do not run on the iOS Simulator** — test
   `background` triggers on a physical device. The BGTask launch handler and notification

@@ -1,7 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import Conductor, {
   Priority,
-  TaskResult,
   type RegisteredTask,
   type TaskDefinition,
 } from 'expo-conductor';
@@ -36,27 +35,14 @@ export default function App() {
     setTasks(await Conductor.getTasks());
   }, []);
 
-  // Register JS handlers + lifecycle listeners once.
+  // JS handlers ('sync'/'flaky'/'heavy') are registered at module scope in src/tasks.ts
+  // (the correct headless-safe pattern). Here we only subscribe to lifecycle events to
+  // drive the on-screen log.
   useEffect(() => {
-    Conductor.defineTask('sync', (ctx) => {
-      append(`▶︎ JS handler "sync" ran (trigger=${ctx.triggerType}, attempt=${ctx.attempt})`);
-      return TaskResult.NEW_DATA;
-    });
-    Conductor.defineTask('flaky', (ctx) => {
-      if (ctx.attempt < 2) {
-        append(`✗ "flaky" failing on attempt ${ctx.attempt}`);
-        return TaskResult.FAILED;
-      }
-      append(`✓ "flaky" succeeded on attempt ${ctx.attempt}`);
-      return TaskResult.SUCCESS;
-    });
-    Conductor.defineTask('heavy', () => {
-      append('▶︎ "heavy" ran');
-      return TaskResult.SUCCESS;
-    });
-
     const subs = [
-      Conductor.addListener('onTaskExecute', (p) => append(`execute → ${p.taskId}`)),
+      Conductor.addListener('onTaskExecute', (p) =>
+        append(`execute → ${p.taskId} (trigger=${p.triggerType}, attempt=${p.attempt})`),
+      ),
       Conductor.addListener('onTaskComplete', (p) => append(`complete → ${p.taskId} (${p.result})`)),
       Conductor.addListener('onTaskSkipped', (p) => append(`skipped → ${p.taskId} (${p.reason})`)),
       Conductor.addListener('onTaskError', (p) => append(`error → ${p.taskId} (${p.error})`)),

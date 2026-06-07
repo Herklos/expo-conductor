@@ -120,6 +120,31 @@ describe('ConductorClient', () => {
     expect(backend.results).toEqual([{ id: 'job', result: TaskResult.SUCCESS }]);
   });
 
+  it('reports registered handler names via isTaskDefined/getDefinedTaskNames', () => {
+    const conductor = new ConductorClient(new MockBackend());
+    expect(conductor.isTaskDefined('a')).toBe(false);
+    conductor.defineTask('a', () => {});
+    conductor.defineTask('b', () => {});
+    expect(conductor.isTaskDefined('a')).toBe(true);
+    expect(conductor.getDefinedTaskNames().sort()).toEqual(['a', 'b']);
+    conductor.undefineTask('a');
+    expect(conductor.isTaskDefined('a')).toBe(false);
+  });
+
+  it('warns when scheduling a headless-capable JS task with no registered handler', async () => {
+    const conductor = new ConductorClient(new MockBackend());
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    await conductor.schedule({ id: 'p', triggers: [{ type: 'push', matchKey: 'k' }] });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain('not ');
+    warn.mockClear();
+    // No warning once the handler is registered.
+    conductor.defineTask('p', () => {});
+    await conductor.schedule({ id: 'p', triggers: [{ type: 'push', matchKey: 'k' }] });
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it('dispatches to the shared handler when task id differs from handler name', async () => {
     // Regression for the handler-name vs taskId mismatch: several dynamically-id'd
     // tasks all point at one named handler.

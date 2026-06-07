@@ -8,10 +8,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.expoconductor.demo",
-      "infoPlist": {
-        "UIBackgroundModes": ["fetch", "processing"]
-      }
+      "bundleIdentifier": "com.expoconductor.demo"
     },
     "android": {
       "package": "com.expoconductor.demo"
