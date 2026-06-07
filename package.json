@@ -1,7 +1,7 @@
 {
   "name": "expo-conductor-monorepo",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "description": "Monorepo for expo-conductor: a task orchestration Expo native module, plus a demo app.",
   "license": "MIT",
   "scripts": {
