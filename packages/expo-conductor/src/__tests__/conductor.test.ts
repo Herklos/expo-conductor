@@ -40,6 +40,9 @@ class MockBackend implements ConductorBackend {
   async getStatusAsync(): Promise<'available' | 'restricted' | 'unsupported'> {
     return 'available';
   }
+  async requestPermissionsAsync(): Promise<boolean> {
+    return true;
+  }
   async reportResultAsync(id: string, result: TaskResult, error?: string): Promise<void> {
     this.results.push({ id, result, error });
   }

@@ -9,7 +9,10 @@ import UserNotifications
 /// notifications it does not own (those without a `conductorTask` userInfo key).
 final class ConductorNotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
   static let shared = ConductorNotificationDelegate()
-  private weak var previousDelegate: UNUserNotificationCenterDelegate?
+  // Held strongly: UNUserNotificationCenter.delegate is itself weak, so once we install
+  // ourselves the center no longer retains the delegate we displaced — we must keep it
+  // alive to forward foreign notifications to it.
+  private var previousDelegate: UNUserNotificationCenterDelegate?
 
   static func install() {
     let center = UNUserNotificationCenter.current()

@@ -27,6 +27,11 @@ public class ConductorAppDelegate: ExpoAppDelegateSubscriber {
 
   /// APNs data-message path for `push` triggers (the iOS counterpart of Android's FCM
   /// service). A remote notification carrying `conductorTask` dispatches the matching task.
+  ///
+  /// Security: only tasks that explicitly declare a `push` trigger with a matching
+  /// `matchKey` are dispatched — a forged push cannot trigger arbitrary tasks by id. The
+  /// remote `userInfo` passed to handlers is untrusted input.
+  @objc
   public func application(
     _ application: UIApplication,
     didReceiveRemoteNotification userInfo: [AnyHashable: Any],
@@ -37,7 +42,6 @@ public class ConductorAppDelegate: ExpoAppDelegateSubscriber {
       return
     }
     let task = TaskStore().all().first { task in
-      if (task["id"] as? String) == key { return true }
       let triggers = task["triggers"] as? [[String: Any]] ?? []
       return triggers.contains {
         ($0["type"] as? String) == "push" && ($0["matchKey"] as? String) == key

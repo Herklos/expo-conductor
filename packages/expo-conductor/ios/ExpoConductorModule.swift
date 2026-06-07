@@ -1,5 +1,6 @@
 import ExpoModulesCore
 import Foundation
+import UserNotifications
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -23,6 +24,7 @@ public class ExpoConductorModule: Module {
 
     OnCreate {
       ExpoConductorModule.shared = self
+      self.paused = self.store.isPaused()
       // The notification delegate + BGTask launch handler are registered from
       // ConductorAppDelegate (an ExpoAppDelegateSubscriber) so they run during
       // application(_:didFinishLaunchingWithOptions:), which BGTaskScheduler requires.
@@ -58,6 +60,7 @@ public class ExpoConductorModule: Module {
     AsyncFunction("pauseAsync") { [weak self] in
       guard let self else { return }
       self.paused = true
+      self.store.setPaused(true)
       for task in self.store.all() {
         if let id = task["id"] as? String { self.unschedule(id) }
       }
@@ -66,11 +69,18 @@ public class ExpoConductorModule: Module {
     AsyncFunction("resumeAsync") { [weak self] in
       guard let self else { return }
       self.paused = false
+      self.store.setPaused(false)
       for task in self.store.all() { self.schedule(task) }
     }
 
     AsyncFunction("getStatusAsync") { () -> String in
       ExpoConductorModule.backgroundStatus()
+    }
+
+    AsyncFunction("requestPermissionsAsync") { (promise: Promise) in
+      UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+        promise.resolve(granted)
+      }
     }
 
     AsyncFunction("reportResultAsync") { [weak self] (id: String, result: String, error: String?) in
@@ -112,6 +122,7 @@ public class ExpoConductorModule: Module {
   /// replay on the next foreground launch.
   static func runDueBackgroundTasksHeadless() {
     let store = TaskStore()
+    if store.isPaused() { return }
     let now = Int(Date().timeIntervalSince1970 * 1000)
     for task in store.all() where isDue(task, now: now) {
       dispatchHeadless(task, data: [:])
@@ -122,6 +133,10 @@ public class ExpoConductorModule: Module {
     guard let id = task["id"] as? String,
           let handler = task["handler"] as? [String: Any],
           (handler["type"] as? String) == "native" else { return }
+    if TaskStore().isPaused() { return }
+    // Honor execution policy (esp. expiry/window/charging) even on the headless path.
+    let now = Int(Date().timeIntervalSince1970 * 1000)
+    guard PolicyEngine.evaluate(TaskMapper.constraints(task), DeviceInfo.read(now: now)).eligible else { return }
     let name = handler["name"] as? String ?? id
     _ = ConductorHandlerRegistry.shared.handler(for: name)?(id, data)
     if let recurrence = TaskMapper.parseRecurrence(task),

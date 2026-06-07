@@ -87,6 +87,14 @@ export class ConductorClient {
     return this.backend.getStatusAsync();
   }
 
+  /**
+   * Request notification permission (needed for notification/time/alarm triggers to
+   * surface). Resolves to whether permission is granted.
+   */
+  requestPermissions(): Promise<boolean> {
+    return this.backend.requestPermissionsAsync();
+  }
+
   addListener<E extends keyof ExpoConductorModuleEvents>(
     event: E,
     listener: ExpoConductorModuleEvents[E],

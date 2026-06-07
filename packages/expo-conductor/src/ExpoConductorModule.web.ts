@@ -69,6 +69,9 @@ class ExpoConductorWebModule
   getStatusAsync(): Promise<ConductorStatus> {
     return this.engine.getStatusAsync();
   }
+  requestPermissionsAsync(): Promise<boolean> {
+    return this.engine.requestPermissionsAsync();
+  }
   reportResultAsync(id: string, result: TaskResult, error?: string): Promise<void> {
     return this.engine.reportResultAsync(id, result, error);
   }

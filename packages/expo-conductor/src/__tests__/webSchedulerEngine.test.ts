@@ -204,6 +204,21 @@ describe('WebSchedulerEngine', () => {
     expect(fired).toEqual([0, 10_000]);
   });
 
+  it('chains timers for a far-future task instead of firing immediately (setTimeout overflow)', async () => {
+    const h = makeHarness();
+    const engine = new WebSchedulerEngine({ now: h.now, setTimer: h.setTimer, clearTimer: h.clearTimer });
+    const fired: number[] = [];
+    engine.addListener('onTaskExecute', (p) => fired.push(p.firedAt));
+
+    const fortyDays = 40 * 24 * 3600 * 1000; // > setTimeout's ~24.8-day (2^31 ms) limit
+    await engine.registerTaskAsync({ id: 'far', triggers: [{ type: 'time', at: fortyDays }] });
+
+    h.advanceTo(30 * 24 * 3600 * 1000); // 30 days: must NOT have fired yet
+    expect(fired).toEqual([]);
+    h.advanceTo(fortyDays); // now it fires, exactly once
+    expect(fired).toEqual([fortyDays]);
+  });
+
   it('getStatusAsync reports available on web', async () => {
     const h = makeHarness();
     const engine = new WebSchedulerEngine({ now: h.now, setTimer: h.setTimer, clearTimer: h.clearTimer });

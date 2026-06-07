@@ -31,10 +31,15 @@ class ConductorAlarmReceiver : BroadcastReceiver() {
     private const val EXTRA_ID = "taskId"
 
     private fun pendingIntent(context: Context, id: String): PendingIntent {
-      val intent = Intent(context, ConductorAlarmReceiver::class.java).putExtra(EXTRA_ID, id)
+      // Use a per-id data Uri so distinct task ids never alias to the same PendingIntent
+      // (String.hashCode collisions would otherwise cross-cancel/overwrite alarms — the
+      // requestCode and extras are not part of PendingIntent identity, but `data` is).
+      val intent = Intent(context, ConductorAlarmReceiver::class.java)
+        .setData(android.net.Uri.parse("conductor://task/$id"))
+        .putExtra(EXTRA_ID, id)
       return PendingIntent.getBroadcast(
         context,
-        id.hashCode(),
+        0,
         intent,
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
       )

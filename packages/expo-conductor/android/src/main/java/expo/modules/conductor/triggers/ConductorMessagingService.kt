@@ -7,8 +7,12 @@ import expo.modules.conductor.storage.TaskStore
 
 /**
  * Optional FCM trigger. Compiled only when the config plugin is configured with
- * `enableFcm: true`. A data message whose `data.conductorTask` matches a task's
- * push `matchKey` (or id) dispatches that task with the message data as input.
+ * `enableFcm: true`. A data message whose `data.conductorTask` matches the `matchKey`
+ * of a task's `push` trigger dispatches that task with the message data as input.
+ *
+ * Security: matching is restricted to tasks that explicitly declare a `push` trigger,
+ * so a forged remote message cannot trigger arbitrary tasks by id. Treat the message
+ * `data` passed to handlers as untrusted, attacker-controllable input.
  *
  * Apps that already use their own FirebaseMessagingService can instead forward
  * messages to {@link #handleRemoteData}.
@@ -23,7 +27,6 @@ class ConductorMessagingService : FirebaseMessagingService() {
       val key = data["conductorTask"] ?: return
       val store = TaskStore(context)
       val task = store.all().firstOrNull { task ->
-        if (task.optString("id") == key) return@firstOrNull true
         val triggers = task.optJSONArray("triggers") ?: return@firstOrNull false
         (0 until triggers.length()).any {
           val t = triggers.getJSONObject(it)

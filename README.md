@@ -220,6 +220,7 @@ await Conductor.runNow(id)                    // fire immediately, bypassing pol
 await Conductor.setResourceBudget(budget)
 await Conductor.pause() / Conductor.resume()
 await Conductor.getStatus()                   // 'available' | 'restricted' | 'unsupported'
+await Conductor.requestPermissions()          // request notification permission -> boolean granted
 
 Conductor.addListener('onTaskExecute',  (p) => {})
 Conductor.addListener('onTaskComplete', (p) => {})  // includes result
@@ -265,6 +266,31 @@ background behavior on a device:
 
 See [`fixtures/README.md`](./fixtures/README.md) for the shared behavior contract.
 
+## Permissions
+
+Notification, `time`, and `alarm` triggers surface through the OS notification system, which
+requires permission:
+
+- Call `await Conductor.requestPermissions()` before scheduling (iOS prompts via
+  `UNUserNotificationCenter`; web prompts via the Notification API).
+- On **Android 13+**, `POST_NOTIFICATIONS` is a runtime permission. The module reports the
+  current grant state from `requestPermissions()`, but prompting must happen from your
+  Activity — request it there (or via `expo-notifications`).
+- If you already use **`expo-notifications`**, let it own permission requests and channel
+  setup; expo-conductor's notification delegate forwards notifications it doesn't own.
+
+## Push message format
+
+The `push` trigger only matches tasks that declare a `push` trigger with a matching
+`matchKey` (a forged message cannot trigger arbitrary tasks). Senders must use:
+
+- **Android (FCM):** a **data-only** message (`{ "data": { "conductorTask": "<matchKey>" } }`).
+  A `notification` payload is handled by the system tray and won't dispatch when backgrounded.
+- **iOS (APNs):** a **silent/background** push (`content-available: 1`,
+  `apns-push-type: background`, `apns-priority: 5`) carrying `conductorTask`. Background push
+  is throttled by iOS (~2–3/hr) and not guaranteed. Treat `data` passed to handlers as
+  untrusted input.
+
 ## Platform support & limitations
 
 - **iOS has no exact-alarm API.** `alarm` triggers fall back to a scheduled local
@@ -273,6 +299,16 @@ See [`fixtures/README.md`](./fixtures/README.md) for the shared behavior contrac
   intervals are advisory, and **background tasks do not run on the iOS Simulator** — test
   `background` triggers on a physical device. The BGTask launch handler and notification
   delegate are registered for you via an Expo AppDelegate subscriber.
+- **iOS recurrence delivery:** a recurring `notification`/`time` task is re-armed when its
+  notification is delivered to a live app or when a background refresh wakes the app. A
+  recurrence the user never sees and that never coincides with a background wake may not
+  advance on its own — for guaranteed cadence prefer a foregrounded app or a `background`
+  trigger, or pair with `expo-notifications` repeating triggers.
+- **Constraint enforcement:** `requiresCharging`/`requiresIdle`/`network` are mapped to
+  WorkManager constraints on Android (the OS gates the wake), but on iOS (and for
+  `minBatteryLevel`, which WorkManager approximates as "battery not low") they are enforced
+  by re-checking at dispatch — an ineligible task is skipped and rescheduled rather than
+  deferred-until-eligible by the OS.
 - **iOS headless execution:** when the app is fully terminated, a **JS** handler cannot run
   (there is no live JS runtime). Use a **native** handler (`handler.type: 'native'`,
   registered with `ExpoConductorModule.registerHandler`) for work that must run while the

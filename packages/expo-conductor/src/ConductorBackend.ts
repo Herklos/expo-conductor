@@ -27,6 +27,12 @@ export interface ConductorBackend {
   /** Whether background execution is currently permitted on this device. */
   getStatusAsync(): Promise<ConductorStatus>;
   /**
+   * Request notification permission (required for notification/time/alarm triggers to be
+   * delivered). Resolves to whether permission is granted. On Android &lt; 13 and where the
+   * platform cannot prompt, resolves to the current grant state.
+   */
+  requestPermissionsAsync(): Promise<boolean>;
+  /**
    * Report the outcome of a JS handler back to the engine (drives retry/backoff).
    * Pass `error` when the handler threw, to surface an `onTaskError` event.
    */

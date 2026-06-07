@@ -90,6 +90,14 @@ builds need the Android SDK / Xcode (not required for engine verification).
   requires registration before launch completes). Automatic triggers reach `dispatch(...)`
   through that delegate / launch handler. Exact alarms on Android are re-armed in
   `advanceRecurrence` (they don't self-repeat like periodic WorkManager).
+- **Permissions & push scoping**: notification/time/alarm triggers need notification
+  permission — `Conductor.requestPermissions()` prompts on iOS/web; Android 13+ must be
+  prompted from an Activity (or expo-notifications). The `push` trigger matches ONLY tasks
+  that declared a `push` trigger with a matching `matchKey` (no id-fallback) so a forged
+  remote message can't fire arbitrary tasks; treat push `data` as untrusted.
+- **Web `setTimeout` cap**: delays over ~24.8 days (2^31 ms) overflow, so `scheduleTimer`
+  chains timers in <=MAX_TIMER_DELAY hops; the web engine also re-arms persisted tasks in
+  its constructor (persistence would otherwise be write-only).
 - **Headless limits**: a JS handler can't run after the app is terminated (no JS runtime).
   Native handlers (`type: 'native'`) run headless. A possible future direction is to
   delegate the `background` trigger + cold-start dispatch to
