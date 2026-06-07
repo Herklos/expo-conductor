@@ -29,6 +29,9 @@ type Listeners = {
   [E in keyof ExpoConductorModuleEvents]: Set<ExpoConductorModuleEvents[E]>;
 };
 
+/** Max delay setTimeout accepts before its signed-32-bit overflow (~24.8 days). */
+const MAX_TIMER_DELAY = 2_147_483_647;
+
 const DEFAULT_BUDGET: ResourceBudget = { cpu: 1, network: 1, battery: 1, memory: 1 };
 
 const DEFAULT_CONTEXT: DeviceContext = {
@@ -74,6 +77,12 @@ export class WebSchedulerEngine implements ConductorBackend {
     this.clearTimer =
       options.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
     this.deviceContext = options.deviceContext ?? (() => DEFAULT_CONTEXT);
+    // Re-arm timers for tasks restored from persistence (otherwise web persistence is
+    // write-only — tasks survive reload but never fire). A task whose nextRunAt is already
+    // past will fire on the next tick (catch-up).
+    if (!this.paused) {
+      for (const task of this.registry.all()) this.scheduleTimer(task);
+    }
   }
 
   // --- ConductorBackend ----------------------------------------------------
@@ -118,6 +127,17 @@ export class WebSchedulerEngine implements ConductorBackend {
     // On web, timer-based scheduling works while the page is alive; true background
     // execution depends on Periodic Background Sync, which we don't require here.
     return 'available';
+  }
+
+  async requestPermissionsAsync(): Promise<boolean> {
+    const N = (globalThis as { Notification?: { requestPermission?: () => Promise<string>; permission?: string } })
+      .Notification;
+    if (!N) return false;
+    if (N.permission === 'granted') return true;
+    if (typeof N.requestPermission === 'function') {
+      return (await N.requestPermission()) === 'granted';
+    }
+    return false;
   }
 
   async reportResultAsync(id: string, result: TaskResult, error?: string): Promise<void> {
@@ -170,6 +190,14 @@ export class WebSchedulerEngine implements ConductorBackend {
     this.clearTimerFor(task.id);
     if (task.nextRunAt == null) return;
     const delay = Math.max(0, task.nextRunAt - this.now());
+    // setTimeout uses a signed 32-bit delay; anything larger overflows and fires almost
+    // immediately. For far-future runs (e.g. weekly/monthly/cron) chain timers in
+    // <=~24.8-day hops until the real fire time, then dispatch.
+    if (delay > MAX_TIMER_DELAY) {
+      const handle = this.setTimer(() => this.scheduleTimer(task), MAX_TIMER_DELAY);
+      this.timers.set(task.id, handle);
+      return;
+    }
     const handle = this.setTimer(() => this.fire(task, false), delay);
     this.timers.set(task.id, handle);
   }

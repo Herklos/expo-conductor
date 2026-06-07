@@ -205,6 +205,7 @@ export default function App() {
       {
         title: '5 · Lifecycle',
         buttons: [
+          { label: 'Request notif permission', onPress: async () => append(`permission granted: ${await Conductor.requestPermissions()}`) },
           { label: 'Check status', onPress: async () => append(`status: ${await Conductor.getStatus()}`) },
           { label: 'Pause all', onPress: async () => { await Conductor.pause(); append('paused'); } },
           { label: 'Resume all', onPress: async () => { await Conductor.resume(); append('resumed'); await refresh(); } },

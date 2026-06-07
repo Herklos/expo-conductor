@@ -19,12 +19,16 @@ class ConductorWorker(context: Context, params: WorkerParameters) : Worker(conte
     if (store.isPaused()) return Result.success() // conductor paused; skip without retrying
     val task = store.get(id) ?: return Result.success()
     val module = ExpoConductorModule.INSTANCE
-      ?: // No JS runtime: only native handlers can run. Re-enqueue for JS later.
+    if (module == null) {
+      // No JS runtime. Native handlers can still run headless; JS handlers are deferred
+      // (retry) so they execute once a JS runtime exists.
       return if (task.optJSONObject("handler")?.optString("type") == "native") {
+        ExpoConductorModule.dispatchHeadless(applicationContext, task, emptyMap())
         Result.success()
       } else {
         Result.retry()
       }
+    }
     module.dispatch(task, manual = false)
     return Result.success()
   }

@@ -100,6 +100,18 @@ class ExpoConductorModule : Module() {
       }
     }
 
+    AsyncFunction("requestPermissionsAsync") {
+      // POST_NOTIFICATIONS (API 33+) is a runtime permission that must be requested from an
+      // Activity; this module reports the current grant state. Apps should request it via
+      // their Activity (or expo-notifications). Below API 33 notifications are allowed.
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+        true
+      } else {
+        context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+          android.content.pm.PackageManager.PERMISSION_GRANTED
+      }
+    }
+
     AsyncFunction("reportResultAsync") { id: String, result: String, error: String? ->
       // Emits lifecycle events. NOTE: a JS-handler FAILED result is NOT retried by the OS
       // here — the Worker has already returned success by the time JS reports — so OS-level
@@ -178,6 +190,13 @@ class ExpoConductorModule : Module() {
     val id = task.optString("id")
 
     if (!manual) {
+      // Periodic WorkManager ticks at most every 15 min, so a daily/weekly/cron (or any
+      // interval > 15 min) recurrence must be gated on its computed nextRunAt — otherwise
+      // it would fire on every tick. Not-yet-due ticks are a no-op (the worker succeeds).
+      val nextRunAt = if (task.isNull("nextRunAt")) null else task.optLong("nextRunAt")
+      if (nextRunAt != null && System.currentTimeMillis() < nextRunAt) {
+        return
+      }
       val decision = PolicyEngine.evaluate(TaskMapper.constraints(task), deviceContext())
       if (!decision.eligible) {
         emitSkipped(id, decision.reason.name)
@@ -273,6 +292,9 @@ class ExpoConductorModule : Module() {
       // recurrence or re-arm the alarm, otherwise this occurrence is lost — leave the
       // (already-past) nextRunAt so it replays once a JS runtime exists on next launch.
       if (handler?.optString("type") != "native") return
+      // Honor execution policy (esp. expiry/window/charging) even on the headless path.
+      val ctx = DeviceInfo.read(context, System.currentTimeMillis())
+      if (!PolicyEngine.evaluate(TaskMapper.constraints(task), ctx).eligible) return
       nativeHandlers[handler.optString("name")]?.run(task.optString("id"), data)
       val recurrence = TaskMapper.recurrence(task) ?: return
       val next = RecurrenceEngine.nextRun(recurrence, System.currentTimeMillis()) ?: return

@@ -159,9 +159,13 @@ export interface Constraints {
 export interface ExecutionPolicy {
   constraints?: Constraints;
   retry?: RetryPolicy;
-  /** Max number of conductor tasks allowed to run simultaneously. */
+  /**
+   * Reserved — not yet enforced. Max number of conductor tasks allowed to run
+   * simultaneously. (Runtime admission is currently evaluated per-trigger; cross-task
+   * concurrency limiting is planned.)
+   */
   maxConcurrent?: number;
-  /** Allow a higher-priority task to preempt this one. */
+  /** Reserved — not yet enforced. Allow a higher-priority task to preempt this one. */
   preemptible?: boolean;
 }
 

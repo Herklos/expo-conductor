@@ -28,7 +28,6 @@ const ANDROID_PERMISSIONS = [
   'android.permission.RECEIVE_BOOT_COMPLETED',
   'android.permission.WAKE_LOCK',
   'android.permission.POST_NOTIFICATIONS',
-  'android.permission.FOREGROUND_SERVICE',
 ];
 
 const EXACT_ALARM_PERMISSIONS = [
@@ -58,32 +57,12 @@ const withConductorAndroid: ConfigPlugin<ConductorPluginOptions> = (config, opti
     return cfg;
   });
 
-  // Register receivers (and optionally the FCM service) in the manifest.
-  config = withAndroidManifest(config, (cfg) => {
-    const app = AndroidConfig.Manifest.getMainApplicationOrThrow(cfg.modResults);
-    app.receiver = app.receiver ?? [];
-
-    const ensureReceiver = (name: string, exported: boolean, action?: string) => {
-      if (app.receiver!.some((r) => r.$['android:name'] === name)) return;
-      const receiver: Record<string, unknown> = {
-        $: { 'android:name': name, 'android:exported': String(exported) },
-      };
-      if (action) {
-        (receiver as { 'intent-filter': unknown[] })['intent-filter'] = [
-          { action: [{ $: { 'android:name': action } }] },
-        ];
-      }
-      app.receiver!.push(receiver as never);
-    };
-
-    ensureReceiver('expo.modules.conductor.triggers.ConductorAlarmReceiver', false);
-    ensureReceiver(
-      'expo.modules.conductor.triggers.BootReceiver',
-      true,
-      'android.intent.action.BOOT_COMPLETED',
-    );
-
-    if (options.enableFcm) {
+  // The ConductorAlarmReceiver / BootReceiver are declared in the library's own
+  // AndroidManifest.xml (so they work without the plugin and aren't duplicated by the
+  // manifest merger). Only the optional FCM service is added here, when enabled.
+  if (options.enableFcm) {
+    config = withAndroidManifest(config, (cfg) => {
+      const app = AndroidConfig.Manifest.getMainApplicationOrThrow(cfg.modResults);
       app.service = app.service ?? [];
       const name = 'expo.modules.conductor.triggers.ConductorMessagingService';
       if (!app.service.some((s) => s.$['android:name'] === name)) {
@@ -94,10 +73,9 @@ const withConductorAndroid: ConfigPlugin<ConductorPluginOptions> = (config, opti
           ],
         } as never);
       }
-    }
-
-    return cfg;
-  });
+      return cfg;
+    });
+  }
 
   return config;
 };
@@ -105,8 +83,9 @@ const withConductorAndroid: ConfigPlugin<ConductorPluginOptions> = (config, opti
 const withConductorIos: ConfigPlugin<ConductorPluginOptions> = (config, options) => {
   return withInfoPlist(config, (cfg) => {
     const modes = new Set<string>((cfg.modResults.UIBackgroundModes as string[]) ?? []);
+    // Only 'fetch' is needed: the module submits BGAppRefreshTaskRequest. ('processing'
+    // would only be required for BGProcessingTaskRequest, which is not used.)
     modes.add('fetch');
-    modes.add('processing');
     if (options.enableFcm) modes.add('remote-notification');
     cfg.modResults.UIBackgroundModes = Array.from(modes);
 
