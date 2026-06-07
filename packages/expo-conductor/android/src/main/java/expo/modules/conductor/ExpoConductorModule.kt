@@ -212,6 +212,13 @@ class ExpoConductorModule : Module() {
     val handlerType = task.optJSONObject("handler")?.optString("type") ?: "js"
     val handlerName = task.optJSONObject("handler")?.optString("name") ?: id
 
+    // A `notification` trigger posts a user-visible notification when it fires.
+    TaskMapper.notificationTrigger(task)?.let {
+      val title = if (it.has("title")) it.getString("title") else null
+      val body = if (it.has("body")) it.getString("body") else null
+      NotificationDisplay.show(context, id, title, body)
+    }
+
     emit("onTaskExecute", mapOf(
       "taskId" to id,
       "triggerType" to TaskMapper.primaryTriggerType(task),
@@ -287,21 +294,33 @@ class ExpoConductorModule : Module() {
     @JvmStatic
     internal fun dispatchHeadless(context: Context, task: JSONObject, data: Map<String, Any?>) {
       if (TaskStore(context).isPaused()) return
-      val handler = task.optJSONObject("handler")
-      // Only native handlers can run without JS. For a JS handler we must NOT advance the
-      // recurrence or re-arm the alarm, otherwise this occurrence is lost — leave the
-      // (already-past) nextRunAt so it replays once a JS runtime exists on next launch.
-      if (handler?.optString("type") != "native") return
       // Honor execution policy (esp. expiry/window/charging) even on the headless path.
       val ctx = DeviceInfo.read(context, System.currentTimeMillis())
       if (!PolicyEngine.evaluate(TaskMapper.constraints(task), ctx).eligible) return
-      nativeHandlers[handler.optString("name")]?.run(task.optString("id"), data)
+
+      val id = task.optString("id")
+      val handler = task.optJSONObject("handler")
+      val isNative = handler?.optString("type") == "native"
+
+      // A notification trigger delivers its notification regardless of handler type.
+      val notif = TaskMapper.notificationTrigger(task)
+      if (notif != null) {
+        val title = if (notif.has("title")) notif.getString("title") else null
+        val body = if (notif.has("body")) notif.getString("body") else null
+        NotificationDisplay.show(context, id, title, body)
+      }
+      if (isNative) nativeHandlers[handler!!.optString("name")]?.run(id, data)
+
+      // Advance/re-arm only if the occurrence was meaningfully handled here. A pure JS
+      // handler with no notification did nothing, so leave nextRunAt to replay on the
+      // next foreground launch instead of silently losing the occurrence.
+      if (!isNative && notif == null) return
       val recurrence = TaskMapper.recurrence(task) ?: return
       val next = RecurrenceEngine.nextRun(recurrence, System.currentTimeMillis()) ?: return
       task.put("nextRunAt", next)
       TaskStore(context).upsert(task)
       if (TaskMapper.hasAlarmTrigger(task)) {
-        ConductorAlarmReceiver.schedule(context, task.optString("id"), next, TaskMapper.allowWhileIdle(task))
+        ConductorAlarmReceiver.schedule(context, id, next, TaskMapper.allowWhileIdle(task))
       }
     }
   }

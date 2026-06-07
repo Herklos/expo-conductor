@@ -20,7 +20,11 @@ export interface ConductorPluginOptions {
   enableFcm?: boolean;
   /** Request exact-alarm permissions on Android (SCHEDULE_EXACT_ALARM / USE_EXACT_ALARM). */
   enableExactAlarms?: boolean;
-  /** iOS BGTaskScheduler identifiers to permit (added to Info.plist). */
+  /** Enable the iOS remote-notification background mode for the `push` trigger (APNs).
+   *  `enableFcm` implies this; set it on its own for an APNs-only (no Firebase) setup. */
+  enablePush?: boolean;
+  /** Extra iOS BGTaskScheduler identifiers to permit. The module's own
+   *  `com.expoconductor.refresh` identifier is always included. */
   backgroundTaskIdentifiers?: string[];
 }
 
@@ -86,12 +90,15 @@ const withConductorIos: ConfigPlugin<ConductorPluginOptions> = (config, options)
     // Only 'fetch' is needed: the module submits BGAppRefreshTaskRequest. ('processing'
     // would only be required for BGProcessingTaskRequest, which is not used.)
     modes.add('fetch');
-    if (options.enableFcm) modes.add('remote-notification');
+    if (options.enableFcm || options.enablePush) modes.add('remote-notification');
     cfg.modResults.UIBackgroundModes = Array.from(modes);
 
+    // Always include the module's own identifier (the native code registers/submits it),
+    // plus any extras the app declares — otherwise BGTaskScheduler throws at runtime.
     const identifiers = new Set<string>([
       ...((cfg.modResults.BGTaskSchedulerPermittedIdentifiers as string[]) ?? []),
-      ...(options.backgroundTaskIdentifiers ?? DEFAULT_BG_IDENTIFIERS),
+      ...DEFAULT_BG_IDENTIFIERS,
+      ...(options.backgroundTaskIdentifiers ?? []),
     ]);
     cfg.modResults.BGTaskSchedulerPermittedIdentifiers = Array.from(identifiers);
 
