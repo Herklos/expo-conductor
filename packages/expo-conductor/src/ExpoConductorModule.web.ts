@@ -2,6 +2,7 @@ import { registerWebModule, NativeModule } from 'expo';
 
 import type { ConductorBackend, ConductorSubscription } from './ConductorBackend';
 import type {
+  ConductorStatus,
   ExpoConductorModuleEvents,
   RegisteredTask,
   ResourceBudget,
@@ -65,8 +66,11 @@ class ExpoConductorWebModule
   resumeAsync(): Promise<void> {
     return this.engine.resumeAsync();
   }
-  reportResultAsync(id: string, result: TaskResult): Promise<void> {
-    return this.engine.reportResultAsync(id, result);
+  getStatusAsync(): Promise<ConductorStatus> {
+    return this.engine.getStatusAsync();
+  }
+  reportResultAsync(id: string, result: TaskResult, error?: string): Promise<void> {
+    return this.engine.reportResultAsync(id, result, error);
   }
   addListener<E extends keyof ExpoConductorModuleEvents>(
     event: E,

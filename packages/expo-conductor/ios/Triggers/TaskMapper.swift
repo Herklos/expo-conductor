@@ -95,7 +95,7 @@ enum TaskMapper {
     else { return Constraints() }
     var window: ExecutionWindow?
     if let w = c["window"] as? [String: Any] {
-      window = ExecutionWindow(earliest: w["earliest"] as? Int, latest: w["latest"] as? Int)
+      window = ExecutionWindow(earliest: int(w["earliest"]), latest: int(w["latest"]))
     }
     return Constraints(
       window: window,
@@ -103,7 +103,7 @@ enum TaskMapper {
       minBatteryLevel: (c["minBatteryLevel"] as? NSNumber)?.doubleValue,
       network: c["network"] as? String,
       requiresIdle: c["requiresIdle"] as? Bool,
-      expiresAt: c["expiresAt"] as? Int
+      expiresAt: int(c["expiresAt"])
     )
   }
 

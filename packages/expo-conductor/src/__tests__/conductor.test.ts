@@ -10,7 +10,7 @@ import {
 /** In-memory backend that lets tests emit events and observe reported results. */
 class MockBackend implements ConductorBackend {
   registered: RegisteredTask[] = [];
-  results: { id: string; result: TaskResult }[] = [];
+  results: { id: string; result: TaskResult; error?: string }[] = [];
   private executeListeners = new Set<(p: TaskEventPayload) => void>();
 
   async registerTaskAsync(definition: { id: string }): Promise<RegisteredTask> {
@@ -37,8 +37,11 @@ class MockBackend implements ConductorBackend {
   async setResourceBudgetAsync(): Promise<void> {}
   async pauseAsync(): Promise<void> {}
   async resumeAsync(): Promise<void> {}
-  async reportResultAsync(id: string, result: TaskResult): Promise<void> {
-    this.results.push({ id, result });
+  async getStatusAsync(): Promise<'available' | 'restricted' | 'unsupported'> {
+    return 'available';
+  }
+  async reportResultAsync(id: string, result: TaskResult, error?: string): Promise<void> {
+    this.results.push({ id, result, error });
   }
   addListener<E extends keyof ExpoConductorModuleEvents>(
     event: E,
@@ -84,7 +87,7 @@ describe('ConductorClient', () => {
     expect(backend.results).toEqual([{ id: 'noop', result: TaskResult.SUCCESS }]);
   });
 
-  it('reports FAILED when a handler throws', async () => {
+  it('reports FAILED with the error message when a handler throws', async () => {
     const backend = new MockBackend();
     const conductor = new ConductorClient(backend);
     conductor.defineTask('boom', () => {
@@ -92,7 +95,7 @@ describe('ConductorClient', () => {
     });
     backend.emitExecute('boom');
     await flush();
-    expect(backend.results).toEqual([{ id: 'boom', result: TaskResult.FAILED }]);
+    expect(backend.results).toEqual([{ id: 'boom', result: TaskResult.FAILED, error: 'nope' }]);
   });
 
   it('ignores events with no registered JS handler (native handler case)', async () => {

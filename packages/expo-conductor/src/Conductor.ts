@@ -9,6 +9,7 @@
  */
 import type { ConductorBackend, ConductorSubscription } from './ConductorBackend';
 import {
+  type ConductorStatus,
   type ExpoConductorModuleEvents,
   type JsTaskHandler,
   type RegisteredTask,
@@ -81,6 +82,11 @@ export class ConductorClient {
     return this.backend.resumeAsync();
   }
 
+  /** Whether background execution is currently permitted on this device. */
+  getStatus(): Promise<ConductorStatus> {
+    return this.backend.getStatusAsync();
+  }
+
   addListener<E extends keyof ExpoConductorModuleEvents>(
     event: E,
     listener: ExpoConductorModuleEvents[E],
@@ -117,8 +123,9 @@ export class ConductorClient {
     try {
       const result = (await handler(ctx)) ?? TaskResult.SUCCESS;
       await this.backend.reportResultAsync(payload.taskId, result);
-    } catch {
-      await this.backend.reportResultAsync(payload.taskId, TaskResult.FAILED);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      await this.backend.reportResultAsync(payload.taskId, TaskResult.FAILED, message);
     }
   }
 }

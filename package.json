@@ -10,7 +10,6 @@
     "test:kotlin": "cd packages/expo-conductor/android/engine-jvm && gradle test --console=plain",
     "test:swift": "cd packages/expo-conductor/ios && swift test",
     "typecheck": "pnpm -r --if-present typecheck",
-    "lint": "pnpm -r --if-present lint",
     "demo": "pnpm --filter demo start"
   },
   "devDependencies": {

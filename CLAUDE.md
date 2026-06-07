@@ -81,8 +81,20 @@ builds need the Android SDK / Xcode (not required for engine verification).
 - **Handlers are keyed by name, tasks by id.** Several tasks can share one handler, so
   `ConductorClient` maps `taskId -> handlerName` (populated in `schedule`/`defineTaskDefinition`)
   before dispatching `onTaskExecute`. Don't reintroduce a direct `handlers.get(taskId)`.
-- **Events cross threads on Android** — emit via the main-thread helper in
-  `ExpoConductorModule.kt`, never call `sendEvent` directly from a Worker/Receiver.
+- **Events cross threads on both natives** — emit via the main-thread helper (`emit(...)`
+  in `ExpoConductorModule.kt` / `.swift`), never call `sendEvent` directly from a
+  Worker/Receiver/notification-delegate/BGTask handler.
+- **iOS trigger wiring lives in `ConductorAppDelegate`** (an `ExpoAppDelegateSubscriber`
+  registered in `expo-module.config.json`): it installs the `UNUserNotificationCenter`
+  delegate and the `BGTaskScheduler` launch handler during `didFinishLaunching` (BGTask
+  requires registration before launch completes). Automatic triggers reach `dispatch(...)`
+  through that delegate / launch handler. Exact alarms on Android are re-armed in
+  `advanceRecurrence` (they don't self-repeat like periodic WorkManager).
+- **Headless limits**: a JS handler can't run after the app is terminated (no JS runtime).
+  Native handlers (`type: 'native'`) run headless. A possible future direction is to
+  delegate the `background` trigger + cold-start dispatch to
+  `expo-background-task`/`expo-task-manager` while keeping conductor's engine for
+  prioritization.
 - **Kotlin uses nested block comments**: a `/*` inside a KDoc (e.g. writing `a/*b`) opens a
   nested comment. Avoid `/` immediately followed by `*` in doc comments.
 - **Publishing**: the `files` allowlist in `package.json` is explicit (plus `.npmignore`) so

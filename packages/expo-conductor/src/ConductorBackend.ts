@@ -4,6 +4,7 @@
  * implement this shape, so {@link ConductorClient} is platform-agnostic.
  */
 import type {
+  ConductorStatus,
   ExpoConductorModuleEvents,
   RegisteredTask,
   ResourceBudget,
@@ -23,8 +24,13 @@ export interface ConductorBackend {
   setResourceBudgetAsync(budget: ResourceBudget): Promise<void>;
   pauseAsync(): Promise<void>;
   resumeAsync(): Promise<void>;
-  /** Report the outcome of a JS handler back to the engine (drives retry/backoff). */
-  reportResultAsync(id: string, result: TaskResult): Promise<void>;
+  /** Whether background execution is currently permitted on this device. */
+  getStatusAsync(): Promise<ConductorStatus>;
+  /**
+   * Report the outcome of a JS handler back to the engine (drives retry/backoff).
+   * Pass `error` when the handler threw, to surface an `onTaskError` event.
+   */
+  reportResultAsync(id: string, result: TaskResult, error?: string): Promise<void>;
   addListener<E extends keyof ExpoConductorModuleEvents>(
     event: E,
     listener: ExpoConductorModuleEvents[E],

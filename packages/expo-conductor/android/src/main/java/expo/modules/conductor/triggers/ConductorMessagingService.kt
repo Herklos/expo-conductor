@@ -30,7 +30,12 @@ class ConductorMessagingService : FirebaseMessagingService() {
           t.optString("type") == "push" && (t.optString("matchKey") == key)
         }
       } ?: return
-      ExpoConductorModule.INSTANCE?.dispatch(task, manual = false, data = data)
+      val module = ExpoConductorModule.INSTANCE
+      if (module != null) {
+        module.dispatch(task, manual = false, data = data)
+      } else {
+        ExpoConductorModule.dispatchHeadless(context, task, data)
+      }
     }
   }
 }

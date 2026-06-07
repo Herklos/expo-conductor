@@ -1,5 +1,8 @@
 import ExpoModulesCore
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// iOS Expo module for expo-conductor. Implements the same JS-facing contract as the
 /// Web engine (`ConductorBackend`) using UNUserNotificationCenter for time/notification
@@ -20,6 +23,9 @@ public class ExpoConductorModule: Module {
 
     OnCreate {
       ExpoConductorModule.shared = self
+      // The notification delegate + BGTask launch handler are registered from
+      // ConductorAppDelegate (an ExpoAppDelegateSubscriber) so they run during
+      // application(_:didFinishLaunchingWithOptions:), which BGTaskScheduler requires.
     }
 
     AsyncFunction("registerTaskAsync") { [weak self] (definition: [String: Any]) -> [String: Any] in
@@ -63,12 +69,51 @@ public class ExpoConductorModule: Module {
       for task in self.store.all() { self.schedule(task) }
     }
 
-    AsyncFunction("reportResultAsync") { [weak self] (id: String, result: String) in
+    AsyncFunction("getStatusAsync") { () -> String in
+      ExpoConductorModule.backgroundStatus()
+    }
+
+    AsyncFunction("reportResultAsync") { [weak self] (id: String, result: String, error: String?) in
       guard let self else { return }
-      self.sendEvent("onTaskComplete", [
+      if let error {
+        self.emit("onTaskError", [
+          "taskId": id, "error": error, "firedAt": self.nowMs(), "attempt": 1, "triggerType": "background",
+        ])
+      }
+      self.emit("onTaskComplete", [
         "taskId": id, "result": result, "firedAt": self.nowMs(), "attempt": 1, "triggerType": "background",
       ])
     }
+  }
+
+  /// Emit a JS event on the main thread (triggers run on notification/BGTask threads).
+  private func emit(_ name: String, _ payload: [String: Any]) {
+    DispatchQueue.main.async { [weak self] in self?.sendEvent(name, payload) }
+  }
+
+  /// Run every task that is currently due (used by the BGTask launch handler).
+  func runDueBackgroundTasks() {
+    let now = nowMs()
+    for task in store.all() {
+      let due = (task["nextRunAt"] as? Int).map { $0 <= now } ?? false
+      let isBackground = (task["triggers"] as? [[String: Any]])?
+        .contains { ($0["type"] as? String) == "background" } ?? false
+      if due || isBackground { dispatch(task, manual: false) }
+    }
+  }
+
+  private static func backgroundStatus() -> String {
+    #if canImport(UIKit)
+    let read: () -> UIBackgroundRefreshStatus = { UIApplication.shared.backgroundRefreshStatus }
+    let status = Thread.isMainThread ? read() : DispatchQueue.main.sync(execute: read)
+    switch status {
+    case .available: return "available"
+    case .denied, .restricted: return "restricted"
+    @unknown default: return "available"
+    }
+    #else
+    return "available"
+    #endif
   }
 
   // MARK: - scheduling
@@ -89,8 +134,18 @@ public class ExpoConductorModule: Module {
       )
     }
     if recurrence != nil || hasBackgroundTrigger(task) {
-      BackgroundScheduler.scheduleRefresh(earliestMs: nextRunAt)
+      // Prefer an explicit next-run; otherwise honor the background trigger's advisory
+      // minimum interval (the OS still decides actual timing).
+      let earliest = nextRunAt ?? minimumIntervalEarliestMs(task)
+      BackgroundScheduler.scheduleRefresh(earliestMs: earliest)
     }
+  }
+
+  /// `now + minimumIntervalMinutes` for a background trigger, if specified.
+  private func minimumIntervalEarliestMs(_ task: [String: Any]) -> Int? {
+    let bg = (task["triggers"] as? [[String: Any]])?.first { ($0["type"] as? String) == "background" }
+    guard let minutes = bg?["minimumIntervalMinutes"] as? Int else { return nil }
+    return nowMs() + minutes * 60_000
   }
 
   private func unschedule(_ id: String) {
@@ -111,12 +166,12 @@ public class ExpoConductorModule: Module {
     if !manual {
       let decision = PolicyEngine.evaluate(TaskMapper.constraints(task), DeviceInfo.read(now: now))
       if !decision.eligible {
-        sendEvent("onTaskSkipped", ["taskId": id, "reason": decision.reason.rawValue])
+        emit("onTaskSkipped", ["taskId": id, "reason": decision.reason.rawValue])
         return
       }
       let admission = WeightEngine.admit(budget, [TaskMapper.weightedTask(task, now: now)])
       if !admission.admitted.contains(id) {
-        sendEvent("onTaskSkipped", ["taskId": id, "reason": "DEFERRED_BY_BUDGET"])
+        emit("onTaskSkipped", ["taskId": id, "reason": "DEFERRED_BY_BUDGET"])
         return
       }
     }
@@ -125,7 +180,7 @@ public class ExpoConductorModule: Module {
     let handlerType = handler?["type"] as? String ?? "js"
     let handlerName = handler?["name"] as? String ?? id
 
-    sendEvent("onTaskExecute", [
+    emit("onTaskExecute", [
       "taskId": id,
       "triggerType": TaskMapper.primaryTriggerType(task),
       "firedAt": now,
@@ -135,7 +190,7 @@ public class ExpoConductorModule: Module {
 
     if handlerType == "native" {
       let result = ConductorHandlerRegistry.shared.handler(for: handlerName)?(id, data) ?? "noData"
-      sendEvent("onTaskComplete", ["taskId": id, "result": result, "firedAt": now, "attempt": 1, "triggerType": "background"])
+      emit("onTaskComplete", ["taskId": id, "result": result, "firedAt": now, "attempt": 1, "triggerType": "background"])
     }
 
     advanceRecurrence(task)
