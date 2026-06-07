@@ -179,6 +179,9 @@ export class WebSchedulerEngine implements ConductorBackend {
     for (const id of [...this.timers.keys()]) this.clearTimerFor(id);
     // Drop leadership while paused so a non-paused instance can take over the work.
     for (const id of [...this.leaderClaims.keys()]) this.releaseLeader(id);
+    // Discard deferred-by-leader markers too: their occurrences are stale once paused, and
+    // a re-grant after resume must not replay them (it fires on the fresh schedule instead).
+    this.deferredByLeader.clear();
   }
 
   async resumeAsync(): Promise<void> {
@@ -300,7 +303,11 @@ export class WebSchedulerEngine implements ConductorBackend {
       // and catches up if/when it later becomes the leader (see onLeadershipGain).
       if (!this.isLeaderFor(task)) {
         this.emit('onTaskSkipped', { taskId: task.id, reason: 'DEFERRED_BY_LEADER' });
-        this.deferredByLeader.add(task.id);
+        // Mark for catch-up on handoff ONLY for repeating / appState work. A pure one-shot
+        // (time/alarm/notification) is intentionally NOT replayed: the leader already ran
+        // its occurrence, so replaying here would be the cross-instance double-run that
+        // single-flight exists to prevent (see policy.singleFlight docs).
+        if (isReplayableOnHandoff(task)) this.deferredByLeader.add(task.id);
         this.reschedule(task, now);
         return;
       }
@@ -329,11 +336,13 @@ export class WebSchedulerEngine implements ConductorBackend {
         this.deferRetry(task, now);
         return;
       }
-      // Admitted as the leader — this occurrence is handled, so drop any deferred marker.
-      this.deferredByLeader.delete(task.id);
       // Mark running until the handler reports a result (drives cross-task budgeting).
       this.running.set(task.id, task.weight);
     }
+
+    // This occurrence is now being handled (by the leader, or a manual run) — drop any
+    // deferred-by-leader marker so a leadership grant on a later microtask can't replay it.
+    this.deferredByLeader.delete(task.id);
 
     // Schedule the next occurrence first, so that if the handler reports a
     // failure synchronously the retry timer is not clobbered by rescheduling.
@@ -465,7 +474,12 @@ export class WebSchedulerEngine implements ConductorBackend {
   // --- app-state triggers --------------------------------------------------
 
   /** Fire every task with an `appState` trigger matching this foreground/background
-   *  transition (subject to the same single-flight + policy + budget gating). */
+   *  transition (subject to the same single-flight + policy + budget gating).
+   *
+   *  Note: an appState fire and a recurrence-timer fire are not atomic — a task carrying
+   *  both could, in the rare case they coincide in one tick, emit two `onTaskExecute`s
+   *  (two attempts). Handlers should be idempotent (e.g. dedup on content); the engine does
+   *  not collapse them, since `running` is cleared only when the consumer reports a result. */
   private onAppState(state: AppStateTransition): void {
     if (this.paused) return;
     for (const task of this.registry.all()) {
@@ -474,6 +488,14 @@ export class WebSchedulerEngine implements ConductorBackend {
       }
     }
   }
+}
+
+/** Whether a task deferred while a non-leader should be replayed when this instance later
+ *  gains leadership: true for repeating (recurrence) or event (appState) work, false for a
+ *  pure one-shot (time/alarm/notification), whose occurrence the leader already ran. */
+function isReplayableOnHandoff(task: RegisteredTask): boolean {
+  if (task.recurrence != null) return true;
+  return task.triggers.some((t) => t.type === 'recurrence' || t.type === 'appState');
 }
 
 /** Resolve a task's single-flight leader key, or null when it didn't opt in. */

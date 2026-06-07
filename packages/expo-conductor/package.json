@@ -1,6 +1,6 @@
 {
   "name": "@drakkar.software/expo-conductor",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Define tasks in an Expo app with rich execution policies (time, notifications, FCM/push, alarms, background) — priority, resource weight, recurrence and constraints. Native-first engine on Android (Kotlin) and iOS (Swift) with a Web implementation.",
   "main": "build/index.js",
   "types": "build/index.d.ts",
