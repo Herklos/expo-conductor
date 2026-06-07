@@ -160,13 +160,12 @@ export interface ExecutionPolicy {
   constraints?: Constraints;
   retry?: RetryPolicy;
   /**
-   * Reserved — not yet enforced. Max number of conductor tasks allowed to run
-   * simultaneously. (Runtime admission is currently evaluated per-trigger; cross-task
-   * concurrency limiting is planned.)
+   * Max number of tasks allowed to run simultaneously when this task is admitted. The
+   * engine counts in-flight tasks and defers this one (emitting `onTaskSkipped` with
+   * `DEFERRED_BY_BUDGET`) if admitting it would exceed the limit. Enforced fully in the
+   * Web engine and within a live native process; see the README for headless caveats.
    */
   maxConcurrent?: number;
-  /** Reserved — not yet enforced. Allow a higher-priority task to preempt this one. */
-  preemptible?: boolean;
 }
 
 // ---------------------------------------------------------------------------

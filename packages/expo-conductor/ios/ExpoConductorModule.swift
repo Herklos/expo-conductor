@@ -14,8 +14,32 @@ public class ExpoConductorModule: Module {
   private let store = TaskStore()
   private var paused = false
   private var budget = ResourceWeight(cpu: 1, network: 1, battery: 1, memory: 1)
+  // Weight of tasks currently running in this process, for best-effort cross-task budgeting.
+  // Guarded by `runningLock` since dispatch runs on notification/BGTask threads.
+  private var running: [String: ResourceWeight] = [:]
+  private let runningLock = NSLock()
 
   private func nowMs() -> Int { Int(Date().timeIntervalSince1970 * 1000) }
+
+  private func markRunning(_ id: String, _ weight: ResourceWeight) {
+    runningLock.lock(); defer { runningLock.unlock() }
+    running[id] = weight
+  }
+
+  private func clearRunning(_ id: String) {
+    runningLock.lock(); defer { runningLock.unlock() }
+    running[id] = nil
+  }
+
+  /// Budget + count consumed by other in-flight tasks (excluding `excludeId`).
+  private func runningUsage(excluding excludeId: String) -> (Int, ResourceWeight) {
+    runningLock.lock(); defer { runningLock.unlock() }
+    var cpu = 0.0, network = 0.0, battery = 0.0, memory = 0.0, count = 0
+    for (id, w) in running where id != excludeId {
+      cpu += w.cpu; network += w.network; battery += w.battery; memory += w.memory; count += 1
+    }
+    return (count, ResourceWeight(cpu: cpu, network: network, battery: battery, memory: memory))
+  }
 
   public func definition() -> ModuleDefinition {
     Name("ExpoConductorModule")
@@ -85,6 +109,7 @@ public class ExpoConductorModule: Module {
 
     AsyncFunction("reportResultAsync") { [weak self] (id: String, result: String, error: String?) in
       guard let self else { return }
+      self.clearRunning(id) // no longer occupies a concurrency/budget slot
       if let error {
         self.emit("onTaskError", [
           "taskId": id, "error": error, "firedAt": self.nowMs(), "attempt": 1, "triggerType": "background",
@@ -215,11 +240,16 @@ public class ExpoConductorModule: Module {
         emit("onTaskSkipped", ["taskId": id, "reason": decision.reason.rawValue])
         return
       }
-      let admission = WeightEngine.admit(budget, [TaskMapper.weightedTask(task, now: now)])
+      // Admit against the budget/count consumed by other in-flight tasks in this process.
+      let usage = runningUsage(excluding: id)
+      let admission = WeightEngine.admit(
+        budget, [TaskMapper.weightedTask(task, now: now)], running: usage.0, used: usage.1
+      )
       if !admission.admitted.contains(id) {
         emit("onTaskSkipped", ["taskId": id, "reason": "DEFERRED_BY_BUDGET"])
         return
       }
+      markRunning(id, TaskMapper.weightOf(task))
     }
 
     let handler = task["handler"] as? [String: Any]
@@ -236,6 +266,7 @@ public class ExpoConductorModule: Module {
 
     if handlerType == "native" {
       let result = ConductorHandlerRegistry.shared.handler(for: handlerName)?(id, data) ?? "noData"
+      clearRunning(id) // completed synchronously
       emit("onTaskComplete", ["taskId": id, "result": result, "firedAt": now, "attempt": 1, "triggerType": "background"])
     }
 

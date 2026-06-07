@@ -219,6 +219,67 @@ describe('WebSchedulerEngine', () => {
     expect(fired).toEqual([fortyDays]);
   });
 
+  it('defers a due task when an in-flight task already consumes the budget', async () => {
+    const h = makeHarness();
+    const engine = new WebSchedulerEngine({
+      now: h.now,
+      setTimer: h.setTimer,
+      clearTimer: h.clearTimer,
+      deferRetryMs: 500,
+    });
+    await engine.setResourceBudgetAsync({ cpu: 1, network: 1, battery: 1, memory: 1 });
+    const fired: string[] = [];
+    const skipped: TaskSkippedEventPayload[] = [];
+    engine.addListener('onTaskExecute', (p) => fired.push(p.taskId));
+    engine.addListener('onTaskSkipped', (p) => skipped.push(p));
+
+    // Two heavy tasks due at the same instant; together they exceed the cpu budget.
+    await engine.registerTaskAsync({
+      id: 'first',
+      weight: { cpu: 0.7, network: 0.1, battery: 0.1, memory: 0.1 },
+      triggers: [{ type: 'time', at: 1000 }],
+    });
+    await engine.registerTaskAsync({
+      id: 'second',
+      weight: { cpu: 0.7, network: 0.1, battery: 0.1, memory: 0.1 },
+      triggers: [{ type: 'time', at: 1000 }],
+    });
+    h.advanceTo(1000); // 'first' runs and stays in-flight (no result reported)
+    expect(fired).toEqual(['first']);
+    expect(skipped).toEqual([{ taskId: 'second', reason: 'DEFERRED_BY_BUDGET' }]);
+
+    // Once 'first' completes, the freed budget lets 'second' run on its retry.
+    await engine.reportResultAsync('first', TaskResult.SUCCESS);
+    h.advanceTo(2000);
+    expect(fired).toContain('second');
+  });
+
+  it('enforces maxConcurrent across in-flight tasks', async () => {
+    const h = makeHarness();
+    const engine = new WebSchedulerEngine({ now: h.now, setTimer: h.setTimer, clearTimer: h.clearTimer });
+    const fired: string[] = [];
+    const skipped: TaskSkippedEventPayload[] = [];
+    engine.addListener('onTaskExecute', (p) => fired.push(p.taskId));
+    engine.addListener('onTaskSkipped', (p) => skipped.push(p));
+
+    const light = { cpu: 0.1, network: 0.1, battery: 0.1, memory: 0.1 };
+    await engine.registerTaskAsync({
+      id: 'a',
+      weight: light,
+      policy: { maxConcurrent: 1 },
+      triggers: [{ type: 'time', at: 1000 }],
+    });
+    await engine.registerTaskAsync({
+      id: 'b',
+      weight: light,
+      policy: { maxConcurrent: 1 },
+      triggers: [{ type: 'time', at: 1000 }],
+    });
+    h.advanceTo(1000);
+    expect(fired).toEqual(['a']);
+    expect(skipped).toEqual([{ taskId: 'b', reason: 'DEFERRED_BY_BUDGET' }]);
+  });
+
   it('getStatusAsync reports available on web', async () => {
     const h = makeHarness();
     const engine = new WebSchedulerEngine({ now: h.now, setTimer: h.setTimer, clearTimer: h.clearTimer });

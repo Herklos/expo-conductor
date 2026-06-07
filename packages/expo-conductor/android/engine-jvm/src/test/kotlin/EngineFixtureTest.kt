@@ -85,11 +85,14 @@ class EngineFixtureTest {
             t.getInt("priority"),
             t.getLong("dueAt"),
             weightFromJson(t.getJSONObject("weight")),
+            if (t.has("maxConcurrent")) t.getInt("maxConcurrent") else null,
           )
         }
       }
+      val running = if (c.has("running")) c.getInt("running") else 0
+      val used = if (c.has("used")) weightFromJson(c.getJSONObject("used")) else null
       val expected = c.getJSONObject("expected")
-      val result = WeightEngine.admit(budget, tasks)
+      val result = WeightEngine.admit(budget, tasks, running, used)
       assertEquals(c.getString("name") + " [admitted]", ids(expected.getJSONArray("admitted")), result.admitted)
       assertEquals(c.getString("name") + " [deferred]", ids(expected.getJSONArray("deferred")), result.deferred)
     }

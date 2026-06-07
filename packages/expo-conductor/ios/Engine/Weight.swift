@@ -8,11 +8,13 @@ public enum WeightEngine {
     public let priority: Int
     public let dueAt: Int
     public let weight: ResourceWeight
-    public init(id: String, priority: Int, dueAt: Int, weight: ResourceWeight) {
+    public let maxConcurrent: Int?
+    public init(id: String, priority: Int, dueAt: Int, weight: ResourceWeight, maxConcurrent: Int? = nil) {
       self.id = id
       self.priority = priority
       self.dueAt = dueAt
       self.weight = weight
+      self.maxConcurrent = maxConcurrent
     }
   }
 
@@ -33,20 +35,33 @@ public enum WeightEngine {
     return a.id < b.id
   }
 
-  /// Skip-over greedy admission ordered by the priority comparator.
-  public static func admit(_ budget: ResourceWeight, _ tasks: [Task]) -> Admission {
+  /// Skip-over greedy admission ordered by the priority comparator, honoring per-task
+  /// `maxConcurrent` and the budget/count already consumed by in-flight tasks
+  /// (`used`/`running`).
+  public static func admit(
+    _ budget: ResourceWeight,
+    _ tasks: [Task],
+    running: Int = 0,
+    used: ResourceWeight? = nil
+  ) -> Admission {
     let ordered = tasks.sorted(by: isBefore)
-    var cpu = 0.0, network = 0.0, battery = 0.0, memory = 0.0
+    var cpu = used?.cpu ?? 0.0
+    var network = used?.network ?? 0.0
+    var battery = used?.battery ?? 0.0
+    var memory = used?.memory ?? 0.0
+    var count = running
     var admitted: [String] = []
     var deferred: [String] = []
     for task in ordered {
       let w = task.weight
-      let fits = cpu + w.cpu <= budget.cpu
+      let fitsBudget = cpu + w.cpu <= budget.cpu
         && network + w.network <= budget.network
         && battery + w.battery <= budget.battery
         && memory + w.memory <= budget.memory
-      if fits {
+      let fitsConcurrency = task.maxConcurrent == nil || count + 1 <= task.maxConcurrent!
+      if fitsBudget && fitsConcurrency {
         cpu += w.cpu; network += w.network; battery += w.battery; memory += w.memory
+        count += 1
         admitted.append(task.id)
       } else {
         deferred.append(task.id)

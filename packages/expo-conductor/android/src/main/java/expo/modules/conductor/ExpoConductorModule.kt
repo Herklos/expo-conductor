@@ -12,6 +12,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import expo.modules.conductor.engine.PolicyEngine
 import expo.modules.conductor.engine.RecurrenceEngine
+import expo.modules.conductor.engine.ResourceWeight
 import expo.modules.conductor.engine.WeightEngine
 import expo.modules.conductor.storage.TaskStore
 import expo.modules.conductor.triggers.ConductorAlarmReceiver
@@ -113,6 +114,8 @@ class ExpoConductorModule : Module() {
     }
 
     AsyncFunction("reportResultAsync") { id: String, result: String, error: String? ->
+      // No longer occupies a concurrency/budget slot.
+      running.remove(id)
       // Emits lifecycle events. NOTE: a JS-handler FAILED result is NOT retried by the OS
       // here — the Worker has already returned success by the time JS reports — so OS-level
       // retry/backoff applies to native handlers only; JS retry is handled in-process by
@@ -202,11 +205,17 @@ class ExpoConductorModule : Module() {
         emitSkipped(id, decision.reason.name)
         return
       }
-      val admission = WeightEngine.admit(resourceBudget, listOf(TaskMapper.weightedTask(task)))
+      // Admit against the budget/count consumed by tasks already running in this process
+      // (best-effort cross-task budgeting; a killed/relaunched process starts empty).
+      val usage = runningUsage(id)
+      val admission = WeightEngine.admit(
+        resourceBudget, listOf(TaskMapper.weightedTask(task)), usage.first, usage.second,
+      )
       if (!admission.admitted.contains(id)) {
         emitSkipped(id, "DEFERRED_BY_BUDGET")
         return
       }
+      running[id] = TaskMapper.weightOf(task)
     }
 
     val handlerType = task.optJSONObject("handler")?.optString("type") ?: "js"
@@ -231,6 +240,7 @@ class ExpoConductorModule : Module() {
     if (handlerType == "native") {
       val handler = nativeHandlers[handlerName]
       val result = handler?.run(id, data) ?: "noData"
+      running.remove(id) // completed synchronously
       emitComplete(id, result)
     }
 
@@ -251,6 +261,16 @@ class ExpoConductorModule : Module() {
 
   private fun deviceContext() = DeviceInfo.read(context, System.currentTimeMillis())
 
+  /** Budget + count consumed by other tasks running in this process (excluding [excludeId]). */
+  private fun runningUsage(excludeId: String): Pair<Int, ResourceWeight> {
+    var cpu = 0.0; var network = 0.0; var battery = 0.0; var memory = 0.0; var count = 0
+    for ((id, w) in running) {
+      if (id == excludeId) continue
+      cpu += w.cpu; network += w.network; battery += w.battery; memory += w.memory; count++
+    }
+    return count to ResourceWeight(cpu, network, battery, memory)
+  }
+
   private fun emitComplete(id: String, result: String) {
     emit("onTaskComplete", mapOf("taskId" to id, "result" to result, "firedAt" to System.currentTimeMillis(), "attempt" to 1, "triggerType" to "background"))
   }
@@ -267,11 +287,14 @@ class ExpoConductorModule : Module() {
     // Mutated by register/unregister (any thread) and read on Worker/alarm/FCM threads.
     private val nativeHandlers = java.util.concurrent.ConcurrentHashMap<String, ConductorTaskHandler>()
 
+    // Weight of tasks currently running in this process, for best-effort cross-task budgeting.
+    private val running = java.util.concurrent.ConcurrentHashMap<String, ResourceWeight>()
+
     @Volatile
     private var paused = false
 
     @Volatile
-    var resourceBudget = expo.modules.conductor.engine.ResourceWeight(1.0, 1.0, 1.0, 1.0)
+    var resourceBudget = ResourceWeight(1.0, 1.0, 1.0, 1.0)
 
     /** Register a native handler so a task's work can run without JS. */
     @JvmStatic

@@ -123,10 +123,15 @@ A task fires when **any** of its triggers fire. Supported trigger types:
 The engine **orders by priority** (higher first, then earliest-due, then id) and
 **admits** tasks greedily against a `ResourceBudget`, deferring (skip-over) any that would
 exceed a dimension — this is how a heavy, low-priority task yields to lighter or more
-important ones. The multi-task admission algorithm is verified by the shared fixtures on
-all platforms. At runtime each task is evaluated against the live budget when its trigger
-fires; deferred tasks emit `onTaskSkipped` with reason `DEFERRED_BY_BUDGET` and are
-rescheduled.
+important ones. Admission also accounts for the budget **and count already consumed by
+tasks currently running**, and honors each task's `policy.maxConcurrent`, so a task is
+deferred when the device is already busy. When a fired task can't be admitted it emits
+`onTaskSkipped` with reason `DEFERRED_BY_BUDGET` and is retried shortly (it does not lose
+its turn). The admission algorithm is verified across all platforms by the shared fixtures.
+
+Cross-task budgeting is fully realized in the Web engine and within a live native process;
+after a headless cold-start the native "running" set starts empty (each OS-triggered task
+is admitted against whatever else is running in that process).
 
 ```ts
 Conductor.setResourceBudget({ cpu: 1, network: 1, battery: 1, memory: 1 });

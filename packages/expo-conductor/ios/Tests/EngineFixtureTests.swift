@@ -68,11 +68,14 @@ final class EngineFixtureTests: XCTestCase {
           id: $0["id"] as! String,
           priority: $0["priority"] as! Int,
           dueAt: $0["dueAt"] as! Int,
-          weight: weight($0["weight"] as! [String: Any])
+          weight: weight($0["weight"] as! [String: Any]),
+          maxConcurrent: $0["maxConcurrent"] as? Int
         )
       }
+      let running = c["running"] as? Int ?? 0
+      let used = (c["used"] as? [String: Any]).map { weight($0) }
       let expected = c["expected"] as! [String: Any]
-      let result = WeightEngine.admit(budget, tasks)
+      let result = WeightEngine.admit(budget, tasks, running: running, used: used)
       XCTAssertEqual(result.admitted, expected["admitted"] as! [String], (c["name"] as! String) + " [admitted]")
       XCTAssertEqual(result.deferred, expected["deferred"] as! [String], (c["name"] as! String) + " [deferred]")
     }
