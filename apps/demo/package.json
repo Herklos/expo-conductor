@@ -13,8 +13,10 @@
   },
   "dependencies": {
     "expo": "~56.0.9",
+    "expo-background-task": "~56.0.17",
     "expo-conductor": "workspace:*",
     "expo-status-bar": "~3.0.0",
+    "expo-task-manager": "~56.0.17",
     "react": "19.2.7",
     "react-native": "0.85.3"
   },
