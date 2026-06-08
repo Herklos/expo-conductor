@@ -96,7 +96,7 @@ public class ExpoConductorModule: Module {
     }
 
     AsyncFunction("runDueTasksAsync") { [weak self] () -> Int in
-      self?.runDueBackgroundTasks() ?? 0
+      self?.runDueTasks() ?? 0
     }
 
     AsyncFunction("setResourceBudgetAsync") { [weak self] (budget: [String: Any]) in
@@ -110,6 +110,10 @@ public class ExpoConductorModule: Module {
       for task in self.store.all() {
         if let id = task["id"] as? String { self.unschedule(id) }
       }
+      // Also cancel the pending BGTask refresh so a background wake can't run work while paused
+      // (Android cancels its WorkManager/alarm scheduling on pause). resumeAsync re-arms it via
+      // schedule(); dispatch()'s paused gate is the backstop for an already-scheduled wake.
+      BackgroundScheduler.cancel()
     }
 
     AsyncFunction("resumeAsync") { [weak self] in
@@ -148,13 +152,38 @@ public class ExpoConductorModule: Module {
     DispatchQueue.main.async { [weak self] in self?.sendEvent(name, payload) }
   }
 
-  /// Run every task that is currently due (used by the BGTask launch handler). Returns the
-  /// number of tasks fired.
+  /// Run due tasks on a real OS background wake (the BGTask launch handler). INCLUDES
+  /// pure-background tasks (no `nextRunAt`) — they should run when the OS grants a slot.
   @discardableResult
   func runDueBackgroundTasks() -> Int {
+    if paused { return 0 }
     let now = nowMs()
-    let due = store.all().filter { Self.isDue($0, now: now) }
-    // Count tasks actually fired, not merely due (policy/budget can skip some).
+    return fireSorted(store.all().filter { Self.isDue($0, now: now) }, now: now)
+  }
+
+  /// The JS / `expo-background-task` integration entry (`runDueTasksAsync`). Uses the SAME due-set
+  /// as Web/Kotlin — `nextRunAt != nil && nextRunAt <= now` — so the documented "number of tasks
+  /// fired" matches across platforms. Pure-background tasks (nil `nextRunAt`) are excluded here;
+  /// they fire on a real OS wake via `runDueBackgroundTasks`.
+  private func runDueTasks() -> Int {
+    if paused { return 0 }
+    let now = nowMs()
+    return fireSorted(store.all().filter { ($0["nextRunAt"] as? Int).map { $0 <= now } ?? false }, now: now)
+  }
+
+  /// Fire the given tasks highest-priority-first (priority desc, then nextRunAt asc, then id by
+  /// UTF-16 code unit via the shared `idOrderedBefore` — NOT plain String `<`, which is
+  /// Unicode-canonical and would re-introduce the non-ASCII id divergence the 0.1.1 tiebreaker fix
+  /// removed) so the shared budget is allocated fairly. Returns the number actually fired (policy /
+  /// budget can skip some).
+  private func fireSorted(_ tasks: [[String: Any]], now: Int) -> Int {
+    let due = tasks.sorted { a, b in
+      let pa = (a["priority"] as? Int) ?? 0, pb = (b["priority"] as? Int) ?? 0
+      if pa != pb { return pa > pb }
+      let na = (a["nextRunAt"] as? Int) ?? 0, nb = (b["nextRunAt"] as? Int) ?? 0
+      if na != nb { return na < nb }
+      return idOrderedBefore((a["id"] as? String) ?? "", (b["id"] as? String) ?? "")
+    }
     var fired = 0
     for task in due where dispatch(task, manual: false) { fired += 1 }
     return fired
@@ -181,22 +210,39 @@ public class ExpoConductorModule: Module {
   }
 
   static func dispatchHeadless(_ task: [String: Any], data: [String: Any]) {
-    guard let id = task["id"] as? String,
-          let handler = task["handler"] as? [String: Any],
-          (handler["type"] as? String) == "native" else { return }
+    guard let id = task["id"] as? String else { return }
     if TaskStore().isPaused() { return }
     // Honor execution policy (esp. expiry/window/charging) even on the headless path.
     let now = Int(Date().timeIntervalSince1970 * 1000)
     guard PolicyEngine.evaluate(TaskMapper.constraints(task), DeviceInfo.read(now: now)).eligible else { return }
-    let name = handler["name"] as? String ?? id
-    _ = ConductorHandlerRegistry.shared.handler(for: name)?(id, data)
-    if let recurrence = TaskMapper.parseRecurrence(task),
-       let next = RecurrenceEngine.nextRun(recurrence, Int(Date().timeIntervalSince1970 * 1000)) {
-      var updated = task
-      updated["nextRunAt"] = next
-      TaskStore().upsert(updated)
-      NotificationScheduler.schedule(id: id, fireAtMs: next, title: nil, body: nil)
+
+    let handler = task["handler"] as? [String: Any]
+    let isNative = (handler?["type"] as? String) == "native"
+    let notif = (task["triggers"] as? [[String: Any]])?.first { ($0["type"] as? String) == "notification" }
+
+    // A native handler runs headless; a JS handler cannot (no JS runtime).
+    if isNative {
+      let name = handler?["name"] as? String ?? id
+      _ = ConductorHandlerRegistry.shared.handler(for: name)?(id, data)
     }
+
+    // Re-arm the recurrence's NEXT occurrence when the occurrence was meaningfully handled here:
+    // a native handler ran, OR this is a notification task (the OS already delivered the current
+    // notification from its scheduled request, so we must schedule the next one or the chain
+    // dies). Previously this returned early for ANY non-native handler, so a recurring
+    // JS-handler + notification task silently stopped at cold start (Android re-arms it). A pure
+    // JS handler with no notification did nothing headless, so leave nextRunAt to replay on the
+    // next foreground launch. NOTE (vs Android, which app-posts notifications): iOS notifications
+    // are OS-delivered, so we re-arm the next one rather than re-post the current.
+    guard isNative || notif != nil else { return }
+    // min(next recurrence, future one-shots), matching the live reschedule + Web; nil -> nothing
+    // future, so don't re-arm (a fired one-shot is done).
+    let recurrence = TaskMapper.parseRecurrence(task)
+    guard let next = TaskMapper.computeNextRunAt(task, recurrence, now, futureOnly: true) else { return }
+    var updated = task
+    updated["nextRunAt"] = next
+    TaskStore().upsert(updated)
+    NotificationScheduler.schedule(id: id, fireAtMs: next, title: notif?["title"] as? String, body: notif?["body"] as? String)
   }
 
   private static func backgroundStatus() -> String {
@@ -264,6 +310,17 @@ public class ExpoConductorModule: Module {
     let now = nowMs()
 
     if !manual {
+      // Respect pause on the live path too: pauseAsync cancels schedules, but a notification
+      // already in the tray (tapped after pause) or a BGTask wake still reaches dispatch.
+      if paused {
+        emit("onTaskSkipped", ["taskId": id, "reason": "PAUSED"])
+        return false
+      }
+      // Not-yet-due gate: isDue() admits any task with a `background` trigger regardless of
+      // nextRunAt, so a background+recurrence task must be gated on its computed nextRunAt here
+      // or it fires on every BGTask wake (ignoring its interval) and inflates the fired count.
+      // A pure background task has nextRunAt == nil and still passes. Matches Web/Android.
+      if let nextRunAt = task["nextRunAt"] as? Int, now < nextRunAt { return false }
       let decision = PolicyEngine.evaluate(TaskMapper.constraints(task), DeviceInfo.read(now: now))
       if !decision.eligible {
         emit("onTaskSkipped", ["taskId": id, "reason": decision.reason.rawValue])
@@ -295,16 +352,26 @@ public class ExpoConductorModule: Module {
       emit("onTaskComplete", ["taskId": id, "result": result, "firedAt": now, "attempt": 1, "triggerType": "background"])
     }
 
-    advanceRecurrence(task)
+    // A manual run-now must not advance the task's real schedule (matches Web/Android).
+    if !manual { reschedule(task) }
     return true
   }
 
-  private func advanceRecurrence(_ task: [String: Any]) {
-    guard let recurrence = TaskMapper.parseRecurrence(task),
-          let next = RecurrenceEngine.nextRun(recurrence, nowMs())
-    else { return }
+  /// Recompute nextRunAt over the recurrence, or (for a one-shot) over still-FUTURE triggers,
+  /// then persist + re-arm. Mirrors WebSchedulerEngine.reschedule/futureTriggers and Android:
+  /// a fired one-shot with no future trigger clears to nil so runDueBackgroundTasks (the BGTask
+  /// / expo-background-task path) does not re-dispatch it on every wake.
+  private func reschedule(_ task: [String: Any]) {
+    let now = nowMs()
+    let recurrence = TaskMapper.parseRecurrence(task)
+    // Next fire = min(next recurrence, still-FUTURE one-shot triggers); clears to nil when none
+    // remain. `computeNextRunAt(..., futureOnly: true)` folds the recurrence param plus future-only
+    // one-shots into `candidates.min()`, exactly like WebSchedulerEngine.reschedule/futureTriggers —
+    // so a task with BOTH a recurrence AND a sooner one-shot honors both, and a fired one-shot with
+    // nothing future stops.
+    let next = TaskMapper.computeNextRunAt(task, recurrence, now, futureOnly: true)
     var updated = task
-    updated["nextRunAt"] = next
+    updated["nextRunAt"] = next ?? NSNull()
     store.upsert(updated)
     schedule(updated)
   }

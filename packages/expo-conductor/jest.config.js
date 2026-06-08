@@ -4,15 +4,9 @@ module.exports = {
   testEnvironment: 'node',
   roots: ['<rootDir>/src'],
   testMatch: ['**/__tests__/**/*.test.ts'],
-  transform: {
-    '^.+\\.tsx?$': [
-      'ts-jest',
-      {
-        // Transpile-only: keeps tests fast and decoupled from strict unused-var
-        // rules. Type correctness is enforced separately by `pnpm typecheck`.
-        isolatedModules: true,
-      },
-    ],
-  },
+  // The ts-jest preset supplies the .ts(x) transform; it runs transpile-only
+  // because `isolatedModules: true` lives in tsconfig.json (keeps tests fast and
+  // decoupled from strict unused-var rules — type correctness is enforced by
+  // `pnpm typecheck`). The flag moved out of here per ts-jest's deprecation notice.
   clearMocks: true,
 };

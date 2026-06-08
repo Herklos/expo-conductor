@@ -1,0 +1,298 @@
+{
+  "totalFindings": 18,
+  "confirmedCount": 18,
+  "confirmed": [
+    {
+      "title": "Malformed cron is rejected at registration only on Web; native silently accepts it (throw-vs-fire / throw-vs-never-fire divergence)",
+      "severity": "high",
+      "kind": "parity-divergence",
+      "file": "packages/expo-conductor/src/Conductor.ts",
+      "lines": "62-77 (Conductor.ts); 129-130 (WebSchedulerEngine.ts); 64-73 (android TaskMapper.kt); 77-79 (ios TaskMapper.swift)",
+      "dimension": "cron-parity",
+      "claim": "The 0.1.1 registration-time cron guard (assertValidRecurrence throws via isValidCronExpression) lives only in the Web backend's normalize step. Native registration (Android/iOS) never validates the cron expression, so a malformed cron that the Web engine rejects with a thrown Error is silently accepted on native. For some expressions the divergence is even sharper: throw on web vs FIRE on native.",
+      "evidence": "Conductor.ts dispatches registration straight to the backend with no normalize/validation: `async schedule(...) { ... return this.backend.registerTaskAsync(definition); }` and `async defineTaskDefinition(...) { ... return this.backend.registerTaskAsync(definition); }`. normalize() (which calls assertValidRecurrence) runs ONLY inside the Web backend: WebSchedulerEngine.ts:129-130 `async registerTaskAsync(definition) { const task = normalize(definition, this.now());`. normalize.ts:30 throws: `if (recurrence?.kind === 'cron' && !isValidCronExpression(recurrence.expression)) { throw new Error(...) }`. The native mappers construct the cron with ZERO validation — android TaskMapper.kt:70 `\"cron\" -> Recurrence.Cron(r.getString(\"expression\"))` and ios TaskMapper.swift:78-79 `guard let expression = r[\"expression\"] as? String else { return nil } / return .cron(expression: expression)`. The Kotlin/Swift comments in Recurrence.kt:37-38 and Recurrence.swift:43-44 say rejection is \"the normalize boundary's job (see normalize.ts)\" — but native code never executes normalize.ts. Concrete inputs: (1) `\"30 9 * *\"` (4 fields — a dev writing standard 5/6-field-looking cron): isValidCronExpression false -> Web THROWS at schedule(); native registers fine and never fires. (2) `\"3, * *\"` (trailing comma): isValidCronField rejects the empty part (parseIntStrict('') === null) -> Web THROWS; but nextCron on all three splits the minute field on ',' into ['3',''], parses '3', and FIRES at minute 3 — native silently registers AND fires.",
+      "suggested_fix": "Validate the cron expression in both native registration paths at the same boundary as Web. Add an isValidCronExpression equivalent (mirroring parseCronFields + isValidCronField) to RecurrenceEngine in Kotlin and Swift, and reject in TaskMapper.recurrence()/the native register entry point (throw a CodedException on Android, throw/reject the Promise on iOS) when kind == cron and the expression is invalid. Alternatively, call normalize()/assertValidRecurrence() in ConductorClient.schedule/defineTaskDefinition before backend.registerTaskAsync so the guard is platform-agnostic.",
+      "realVotes": 3
+    },
+    {
+      "title": "Kotlin engine fires on Unicode decimal-digit cron tokens; Swift never fires and Web throws (engine parity break)",
+      "severity": "medium",
+      "kind": "parity-divergence",
+      "file": "packages/expo-conductor/android/src/main/java/expo/modules/conductor/engine/Recurrence.kt",
+      "lines": "31 (Recurrence.kt); 37 (Recurrence.swift); 29-31 + 25-27 comment (recurrence.ts)",
+      "dimension": "cron-parity",
+      "claim": "For a cron token containing a Unicode (non-ASCII) decimal digit, the three engines produce three different results, contradicting the explicit comment that \"all three engines accept exactly the same cron tokens.\" Kotlin's toIntOrNull accepts any Unicode Nd digit; Swift's Int(_:) is ASCII-only; JS's \\d is ASCII-only.",
+      "evidence": "Kotlin Recurrence.kt:31 `return field.split(\",\").mapNotNull { it.toIntOrNull() }.contains(value)` — Kotlin String.toIntOrNull delegates per-char to Character.digit(c, 10), which returns the value for ANY Unicode decimal digit (e.g. U+0663 '٣' Arabic-Indic 3, U+FF13 '３' fullwidth 3) -> parses to 3. Swift Recurrence.swift:37 `return field.split(separator: \",\").compactMap { Int($0) }.contains(value)` — Swift Int(_:) parses ASCII 0-9 only, so Int(\"٣\") == nil -> never matches. TS recurrence.ts:30 `return /^[+-]?\\d+$/.test(token) ? Number(token) : null;` — JS \\d is ASCII [0-9] only (even with the u flag), so parseIntStrict('٣') === null -> isValidCronExpression false -> normalize.ts THROWS at registration. So `\"٣ * *\"` (minute field): Web throws at registration, the Swift engine never fires, the Kotlin engine fires at minute 3. The comment at recurrence.ts:25-27 (\"Mirrors Kotlin String.toIntOrNull and Swift Int(_:) so all three engines accept exactly the same cron tokens\") is false for this class of input. The same Kotlin-vs-Swift split occurs in the `*/n` step branch (Recurrence.kt:25 substring(2).toIntOrNull() vs Recurrence.swift:31 Int(field.dropFirst(2))).",
+      "suggested_fix": "Make the Kotlin parse ASCII-strict to match Swift/JS. Replace `it.toIntOrNull()` with a helper that rejects any token not matching ^[+-]?[0-9]+$ before calling toIntOrNull (e.g. `if (!it.matches(Regex(\"[+-]?[0-9]+\"))) null else it.toIntOrNull()`), and apply the same guard in the `*/` step branch (substring(2)). This makes all three engines accept exactly the same (ASCII-only) token set as the comment claims.",
+      "realVotes": 3
+    },
+    {
+      "title": "`*/n` step with n above Int32 max never fires on Kotlin but fires on Web/Swift (integer-width divergence)",
+      "severity": "low",
+      "kind": "parity-divergence",
+      "file": "packages/expo-conductor/android/src/main/java/expo/modules/conductor/engine/Recurrence.kt",
+      "lines": "24-26 (Recurrence.kt); 30-32 (Recurrence.swift); 66-69 (recurrence.ts)",
+      "dimension": "cron-parity",
+      "claim": "A cron step value between 2^31 and 2^63 in the `*/n` branch parses to a finite step on Web (double) and Swift (Int64) and matches value 0 (0 % step === 0), but overflows Int32 to null on Kotlin and is treated as never-matching — different nextRunAt.",
+      "evidence": "Kotlin Recurrence.kt:24-26 `if (field.startsWith(\"*/\")) { val step = field.substring(2).toIntOrNull() ?: return false; return step > 0 && value % step == 0 }` — toIntOrNull returns Int (32-bit); \"3000000000\".toIntOrNull() overflows Int32 -> null -> `?: return false` -> the field NEVER matches. Swift Recurrence.swift:30-32 `if field.hasPrefix(\"*/\") { guard let step = Int(field.dropFirst(2)), step > 0 else { return false }; return value % step == 0 }` — Swift Int is 64-bit here (the engine already holds epoch-ms candidates ~1.7e12 in `candidate`, far past Int32 max, so Int must be 64-bit) -> step = 3e9, 0 % 3e9 == 0 -> matches minute 0. TS recurrence.ts:67-69 `if (field.startsWith('*/')) { const step = parseIntStrict(field.slice(2)); return step != null && step > 0 && value % step === 0; }` — Number('3000000000') = 3e9 (double), 0 % 3e9 === 0 -> matches minute 0. So `\"*/3000000000 * *\"` fires at minute :00 on Web and iOS, but never fires on Android. (Note: this divergence is specific to the `*/` step branch — a plain bounded-field value like `\"3000000000 * *\"` does NOT diverge because minute is bounded 0-59 and equals 3e9 on no engine.)",
+      "suggested_fix": "Use a width-consistent parse for the step across engines. Either parse the step as Long on Kotlin (substring(2).toLongOrNull(), compute value % step with Long), matching Swift's 64-bit Int and JS's double, OR (preferred, since such steps are nonsensical) reject step values > 59 (the max relevant field bound) in isValidCronField/matchCronField on all three engines so an out-of-range step is uniformly rejected at registration.",
+      "realVotes": 3
+    },
+    {
+      "title": "iOS dispatch() lacks the not-yet-due gate: background tasks over-fire every BGTask wake and inflate runDueTasks() count",
+      "severity": "high",
+      "kind": "parity-divergence",
+      "file": "packages/expo-conductor/ios/ExpoConductorModule.swift",
+      "lines": "154-168, 262-300",
+      "dimension": "rundue-count",
+      "claim": "On iOS, runDueBackgroundTasks() treats any task carrying a `background` trigger as due regardless of nextRunAt, and dispatch(manual:false) has no not-yet-due gate, so a background+recurrence task whose nextRunAt is still in the future fires on every BGTask wake and is counted as fired — whereas Kotlin and TS gate on nextRunAt and neither fire nor count it. This both over-fires (ignores the recurrence interval) and diverges the documented \"number of tasks fired\" return.",
+      "evidence": "isDue includes background unconditionally:\n```swift\nprivate static func isDue(_ task: [String: Any], now: Int) -> Bool {\n  let due = (task[\"nextRunAt\"] as? Int).map { $0 <= now } ?? false\n  let isBackground = (task[\"triggers\"] as? [[String: Any]])?\n    .contains { ($0[\"type\"] as? String) == \"background\" } ?? false\n  return due || isBackground\n}\n```\nand dispatch(manual:false) fires with no due check (only policy + budget):\n```swift\nif !manual {\n  let decision = PolicyEngine.evaluate(TaskMapper.constraints(task), DeviceInfo.read(now: now))\n  if !decision.eligible { ...; return false }\n  if !tryAdmit(id, task, now: now) { ...; return false }\n}\n...\nemit(\"onTaskExecute\", [...])\n...\nadvanceRecurrence(task)\nreturn true\n```\nKotlin documents and enforces exactly this gate (ExpoConductorModule.kt 211-217):\n```kotlin\nval nextRunAt = if (task.isNull(\"nextRunAt\")) null else task.optLong(\"nextRunAt\")\nif (nextRunAt != null && System.currentTimeMillis() < nextRunAt) {\n  return false\n}\n```\nand TS runDueTasksAsync filters `t.nextRunAt != null && t.nextRunAt <= now` (WebSchedulerEngine.ts 161), so a future-dated background+recurrence task is never in the due set.",
+      "suggested_fix": "Add the Kotlin not-yet-due gate to the top of the Swift dispatch's `if !manual` block: `let nextRunAt = task[\"nextRunAt\"] as? Int; if let nextRunAt, now < nextRunAt { return false }`. (A pure `background`-only task has nextRunAt == nil and would still pass, matching the OS-driven background semantics; a background task that also has a recurrence/time would then be gated on its computed nextRunAt like the other platforms.)",
+      "realVotes": 3
+    },
+    {
+      "title": "Native runDueTasks() ignores paused: Android/iOS fire due tasks and return nonzero while paused; Web returns 0",
+      "severity": "high",
+      "kind": "parity-divergence",
+      "file": "packages/expo-conductor/ios/ExpoConductorModule.swift",
+      "lines": "153-161, 262-300 (and android/.../ExpoConductorModule.kt 77-86, 207-275)",
+      "dimension": "rundue-count",
+      "claim": "TS short-circuits runDueTasksAsync with `if (this.paused) return 0`, so a paused engine fires nothing and reports 0. Neither the Kotlin runDueTasksAsync nor the Swift runDueBackgroundTasks (nor their dispatch paths) check the paused flag, so when the integration tick (expoBackgroundTask.ts -> runDueTasks()) or an iOS BGTask wake calls them while paused, both natives fire every due task and return a nonzero count — a fired-count divergence and a correctness bug (work runs while paused). On iOS it is also reachable in practice because pauseAsync() only calls unschedule()=NotificationScheduler.cancel and never cancels the BGTaskScheduler refresh, so a real background wake still occurs while paused.",
+      "evidence": "TS guards paused (WebSchedulerEngine.ts 155-156):\n```ts\nasync runDueTasksAsync(): Promise<number> {\n  if (this.paused) return 0;\n```\nSwift runDueBackgroundTasks has no paused check:\n```swift\nfunc runDueBackgroundTasks() -> Int {\n  let now = nowMs()\n  let due = store.all().filter { Self.isDue($0, now: now) }\n  var fired = 0\n  for task in due where dispatch(task, manual: false) { fired += 1 }\n  return fired\n}\n```\nand its dispatch(manual:false) checks only policy + budget, never paused. Kotlin runDueTasksAsync is the same (ExpoConductorModule.kt 77-86): it computes `due` and does `due.count { dispatch(it, manual = false) }` with no `if (paused)` guard, and dispatch has none either. Note the headless paths DO check paused (Kotlin dispatchHeadless line 345 `if (TaskStore(context).isPaused()) return`; Swift runDueBackgroundTasksHeadless line 175 `if store.isPaused() { return }`), so the live path omission is inconsistent even within each native module.",
+      "suggested_fix": "Add an early paused guard to both native entry points: Kotlin `AsyncFunction(\"runDueTasksAsync\") { if (paused) return@AsyncFunction 0; ... }` and Swift `func runDueBackgroundTasks() -> Int { if paused { return 0 }; ... }`, mirroring the TS `if (this.paused) return 0`. Separately, pauseAsync on iOS should cancel/avoid re-arming the BGTask refresh so a wake doesn't fire while paused.",
+      "realVotes": 3
+    },
+    {
+      "title": "Kotlin: a throwing native handler inside runDueTasksAsync aborts the whole batch and returns no count; Swift handler type cannot throw",
+      "severity": "medium",
+      "kind": "parity-divergence",
+      "file": "packages/expo-conductor/android/src/main/java/expo/modules/conductor/ExpoConductorModule.kt",
+      "lines": "85, 264-270",
+      "dimension": "rundue-count",
+      "claim": "Kotlin's ConductorTaskHandler.run returns String with no throws contract (Kotlin has no checked exceptions, so it can throw at runtime). In runDueTasksAsync the count is computed by `due.count { dispatch(it, manual = false) }`, and dispatch runs a native handler unguarded (`handler?.run(id, data)`). If a native handler throws, the exception propagates out of `count {}`, aborts the loop, rejects the AsyncFunction promise (runDueTasks() returns no count), and the remaining due tasks never fire. Swift's ConductorTaskHandler is a non-throwing closure type `(_:,_:) -> String`, so a thrown error is impossible by type, and the TS engine never runs handlers synchronously inside fire()/runDueTasksAsync (JS handlers run async via the onTaskExecute listener and report back), so the count is never aborted there. Result: an exception in one handler mis-counts/aborts only on Android.",
+      "evidence": "Kotlin counts and runs the handler in the same synchronous loop:\n```kotlin\n// runDueTasksAsync\ndue.count { dispatch(it, manual = false) }\n```\n```kotlin\n// dispatch, native branch\nif (handlerType == \"native\") {\n  val handler = nativeHandlers[handlerName]\n  val result = handler?.run(id, data) ?: \"noData\"\n  running.remove(id)\n  emitComplete(id, result)\n}\n```\nKotlin handler type (ConductorTaskHandler.kt 9-16) is `fun interface ... fun run(taskId: String, data: Map<String, Any?>): String` — no throws guarantee. Swift handler type (ConductorTaskHandler.swift 9) is `public typealias ConductorTaskHandler = (_ taskId: String, _ data: [String: Any]) -> String` — non-throwing, so dispatch's `ConductorHandlerRegistry.shared.handler(for: handlerName)?(id, data) ?? \"noData\"` cannot throw.",
+      "suggested_fix": "Wrap the Kotlin native-handler invocation in dispatch in try/catch so a throwing handler is reported as FAILED (emitComplete(id, \"failed\") or onTaskError) and dispatch still returns true (it fired) without aborting runDueTasksAsync: `val result = try { handler?.run(id, data) ?: \"noData\" } catch (e: Throwable) { running.remove(id); emit(\"onTaskError\", ...); \"failed\" }`. This keeps the fired count well-defined and matches Swift/TS where one handler can't abort the batch.",
+      "realVotes": 3
+    },
+    {
+      "title": "Foreground-notification dedup (fix #1) permanently stalls sub-30s recurrences because notifications are one-shot (repeats:false), not repeating",
+      "severity": "high",
+      "kind": "correctness",
+      "file": "packages/expo-conductor/ios/Triggers/NotificationDelegate.swift",
+      "lines": "20-39",
+      "dimension": "ios-glue",
+      "claim": "The dedup window (30s) is justified by a comment claiming it is 'shorter than iOS's 60s minimum repeat interval, so a genuine later re-delivery of a repeating notification is NOT suppressed.' That premise is false: NotificationScheduler ALWAYS schedules one-shot notifications (repeats:false) and re-arms the next occurrence via advanceRecurrence(). For any recurrence with an interval < 30s, the genuine next occurrence fires inside the dedup window, handleOnce returns early WITHOUT calling handle()/dispatch(), so advanceRecurrence() never runs and the next notification is never armed. Result: the recurrence fires once, arms occurrence #2, occurrence #2 is suppressed, and the chain dies permanently. The demo exercises exactly this: apps/demo/src/App.tsx line 87 schedules `{ kind: 'interval', everyMs: 5000 }` (5s). There is no minimum-interval clamp in normalize (src/web/normalize.ts has none on everyMs) nor in NotificationScheduler (only a 1s floor).",
+      "evidence": "NotificationDelegate.swift L20-25: \"Keyed on the request identifier with a window shorter than iOS's 60s minimum repeat interval, so a genuine later re-delivery of a repeating notification is NOT suppressed.\" / private let dedupWindow: TimeInterval = 30. handleOnce L32-35: `if let last = lastHandledAt[identifier], now.timeIntervalSince(last) < dedupWindow { dedupLock.unlock(); return }` (returns BEFORE calling handle). Schedulers.swift L18: `let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)` and L19: `identifier: id` (same identifier reused for every occurrence). ExpoConductorModule.swift dispatch L298 calls advanceRecurrence(task) only on the non-suppressed path; advanceRecurrence L302-310 is the only re-arm of the next notification.",
+      "suggested_fix": "The dedup must distinguish 'same delivery seen twice (willPresent then didReceive)' from 'a genuinely new occurrence'. Don't gate on a wall-clock window tuned to a non-existent repeat interval. Options: (a) include the notification's delivery timestamp (notification.date) in the dedup key so a new occurrence with a new fire time is never deduped against the prior one; or (b) clear lastHandledAt[id] inside advanceRecurrence when a new notification is armed; or (c) shrink dedupWindow below the minimum allowed interval AND enforce that minimum in normalize across all three engines. Also fix the comment, which documents a guarantee the code does not provide.",
+      "realVotes": 3
+    },
+    {
+      "title": "Paused conductor still runs tasks on iOS via the live BGTask/notification dispatch path (pauseAsync never cancels the BGTask request and dispatch() has no paused gate)",
+      "severity": "high",
+      "kind": "parity-divergence",
+      "file": "packages/expo-conductor/ios/ExpoConductorModule.swift",
+      "lines": "106-113,154-161,262-278",
+      "dimension": "ios-glue",
+      "claim": "On iOS the pause guarantee only holds on the HEADLESS path. The instance methods runDueBackgroundTasks() (L154) and dispatch() (L262) never read `paused`. pauseAsync (L106) only cancels local notifications via unschedule()->NotificationScheduler.cancel(); it never calls BGTaskScheduler.cancel/cancelAllTaskRequests (grep of ios/ shows no cancel call at all). ConductorAppDelegate registers a BGTask launch handler that calls module.runDueBackgroundTasks() whenever the module is alive (ConductorAppDelegate.swift L19-20). So: paused app + module still in memory + the pending BGAppRefreshTask fires -> runDueBackgroundTasks -> dispatch -> tasks run despite pause. Same leak for a notification already in the tray tapped after pause: ConductorNotificationDelegate.handle -> module.dispatch with no paused check. Android does NOT have this leak: its background entry point ConductorWorker.kt L19 does `if (store.isPaused()) return Result.success()` before live dispatch, and dispatchHeadless (Kotlin L345) checks isPaused(). iOS dispatchHeadless/runDueBackgroundTasksHeadless DO check (L175, L187) but the live module path does not, breaking cross-platform parity.",
+      "evidence": "pauseAsync L106-113: sets self.paused=true, store.setPaused(true), then only `for task in self.store.all() { self.unschedule(id) }` — and unschedule(id) L248-250 is solely `NotificationScheduler.cancel(id: id)`. runDueBackgroundTasks L154-161 filters due tasks and calls dispatch with no paused read. dispatch L262-278: the `if !manual { ... }` block checks PolicyEngine + tryAdmit but never `paused`. Contrast headless: dispatchHeadless L187 `if TaskStore().isPaused() { return }` and runDueBackgroundTasksHeadless L175 `if store.isPaused() { return }`.",
+      "suggested_fix": "Gate the `!manual` branch of dispatch() on paused, mirroring how policy/budget gate only when !manual (so manual runTaskAsync still works): at the top of `if !manual {`, add `if paused { emit(\"onTaskSkipped\", [\"taskId\": id, \"reason\": \"PAUSED\"]); return false }`. Additionally have pauseAsync cancel the pending background request (e.g. BackgroundScheduler.cancel() calling BGTaskScheduler.shared.cancel(taskRequestWithIdentifier:) or cancelAllTaskRequests()), and resumeAsync re-submit it, to match Android cancelling its WorkManager/alarm scheduling on pause.",
+      "realVotes": 3
+    },
+    {
+      "title": "Unresolved reference: NotificationDisplay used in ExpoConductorModule.kt but never imported (compile error)",
+      "severity": "critical",
+      "kind": "compile-error",
+      "file": "packages/expo-conductor/android/src/main/java/expo/modules/conductor/ExpoConductorModule.kt",
+      "lines": "253, 359 (missing import among 13-20)",
+      "dimension": "android-glue",
+      "claim": "ExpoConductorModule references NotificationDisplay.show(...) at lines 253 (dispatch) and 359 (dispatchHeadless), but NotificationDisplay is defined in a DIFFERENT package (expo.modules.conductor.triggers) and is not imported. Kotlin does not put a sub-package in scope of its parent package, so this is an unresolved reference and the module fails to compile.",
+      "evidence": "ExpoConductorModule.kt line 1: `package expo.modules.conductor`. NotificationDisplay.kt line 1: `package expo.modules.conductor.triggers`; line 18: `object NotificationDisplay {`. The import block (lines 13-20) imports the other .triggers members it uses — `import expo.modules.conductor.triggers.ConductorAlarmReceiver` (18), `import expo.modules.conductor.triggers.ConductorWorker` (19), `import expo.modules.conductor.triggers.TaskMapper` (20) — but there is NO `import expo.modules.conductor.triggers.NotificationDisplay`. Usage at line 253: `NotificationDisplay.show(context, id, title, body)` and line 359: `NotificationDisplay.show(context, id, title, body)`. grep confirms NotificationDisplay is defined only in the triggers package, not in the parent package.",
+      "suggested_fix": "Add `import expo.modules.conductor.triggers.NotificationDisplay` to the import block in ExpoConductorModule.kt (alongside the other triggers imports at lines 18-20).",
+      "realVotes": 3
+    },
+    {
+      "title": "One-time (non-recurring) tasks are never cleared from nextRunAt on Android, causing repeated re-fires via runDueTasksAsync (parity divergence vs web)",
+      "severity": "high",
+      "kind": "parity-divergence",
+      "file": "packages/expo-conductor/android/src/main/java/expo/modules/conductor/ExpoConductorModule.kt",
+      "lines": "77-86 (runDueTasksAsync), 273-286 (advanceRecurrence)",
+      "dimension": "android-glue",
+      "claim": "After a one-time time/notification/alarm task fires, the web reference engine recomputes nextRunAt over only future triggers and sets it to null so the task never fires again. Android's advanceRecurrence early-returns when there is no recurrence and never clears nextRunAt, so a one-shot keeps its now-past nextRunAt in the store. runDueTasksAsync filters on `nextRunAt <= now`, so it re-dispatches the already-fired one-shot on EVERY background tick — a behavioral divergence (web fires once, Android fires repeatedly).",
+      "evidence": "Android advanceRecurrence: `private fun advanceRecurrence(task: JSONObject) { val recurrence = TaskMapper.recurrence(task) ?: return ...` (ExpoConductorModule.kt line 277-278) — returns immediately for a non-recurring task, leaving nextRunAt unchanged. runDueTasksAsync: `.filter { !it.isNull(\"nextRunAt\") && it.optLong(\"nextRunAt\") <= now }` then `due.count { dispatch(it, manual = false) }` (lines 80-85) — a stale past nextRunAt stays due forever. Web reference reschedule(): `const next = computeNextRunAt(futureTriggers(task.triggers, now), task.recurrence, now); const updated = { ...task, nextRunAt: next };` (WebSchedulerEngine.ts 377-378), where futureTriggers keeps only `at > now` one-shots (WebSchedulerEngine.ts 516-522), so a fired one-shot with no recurrence yields next = null and never re-fires.",
+      "suggested_fix": "In dispatch, for a non-manual fire of a task with no recurrence, clear nextRunAt the way the web engine does — recompute over future triggers only and persist null. E.g. replace the `if (!manual) advanceRecurrence(task)` call with logic that, when recurrence is null, recomputes nextRunAt from still-future triggers (mirror computeNextRunAt over future-only triggers) and stores JSONObject.NULL so runDueTasksAsync no longer re-dispatches it.",
+      "realVotes": 3
+    },
+    {
+      "title": "Android normalize does not reject a malformed cron expression at the registration boundary (TS reference throws)",
+      "severity": "low",
+      "kind": "parity-divergence",
+      "file": "packages/expo-conductor/android/src/main/java/expo/modules/conductor/triggers/TaskMapper.kt",
+      "lines": "28-47 (normalize)",
+      "dimension": "android-glue",
+      "claim": "The TS reference normalize() calls assertValidRecurrence() and throws on a malformed cron expression so the developer fails fast at register time. Kotlin TaskMapper.normalize performs no cron validation, so a malformed cron makes RecurrenceEngine.nextRun return null -> nextRunAt null -> the task silently never fires (no error surfaced to the caller). The 0.1.1 commit message states the malformed-cron rejection should happen 'at the normalize boundary' across platforms. (Note: Swift also omits this guard, so the maintainer may have intended it as a TS-only developer guard; flagging for decision.)",
+      "evidence": "TS normalize: `const recurrence = recurrenceFor(def); assertValidRecurrence(recurrence);` (normalize.ts 76-77), where assertValidRecurrence throws `Invalid cron expression ...` (normalize.ts 29-36). Kotlin normalize (TaskMapper.kt 28-47) computes `val recurrence = recurrence(json); val nextRun = computeNextRunAt(json, recurrence, now)` with no isValidCronExpression / require / throw anywhere; grep for `isValidCron|require(|Invalid cron` in the android conductor tree returns nothing.",
+      "suggested_fix": "If cross-platform fail-fast is intended, add a cron-validity check in TaskMapper.normalize (mirror isValidCronExpression: split on ASCII whitespace, exactly three fields, each `*`/`*/<n>`/comma-list of ints) and throw before persisting, matching assertValidRecurrence. Otherwise document explicitly that the throw-on-invalid-cron guard is TS-only and update the 0.1.1 commit/CHANGELOG wording.",
+      "realVotes": 3
+    },
+    {
+      "title": "iOS notification delegate fires arbitrary tasks by id from a forged remote (APNs) push, bypassing the push matchKey security boundary",
+      "severity": "critical",
+      "kind": "security",
+      "file": "packages/expo-conductor/ios/Triggers/NotificationDelegate.swift",
+      "lines": "49-95",
+      "dimension": "push-security",
+      "claim": "The push #7 security fix only hardened the silent-push path (ConductorAppDelegate.didReceiveRemoteNotification, which requires a `push` trigger with a non-empty matchKey). But a SECOND remote-reachable path exists: ConductorNotificationDelegate.willPresent/didReceive fire for any DISPLAYED notification — including a remote APNs notification that carries an `alert` payload — and route to handle(), which looks the task up purely by id with NO push-trigger and NO matchKey check. A forged push of the form {\"aps\":{\"alert\":\"x\"},\"conductorTask\":\"<any-task-id>\"} therefore fires ARBITRARY tasks by id on delivery (foreground willPresent, no user action needed) or on tap (didReceive). This is exactly the threat model the fix claims to defend against — CHANGELOG line 49 asserts 'the FCM / APNs push path now rejects an empty conductorTask' yet this id-fallback path is wide open. The delegate cannot distinguish a locally-scheduled notification (whose userInfo the app set in Schedulers.swift:15 `content.userInfo = [\"conductorTask\": id]`) from a remote one (whose userInfo the push sender set); there is no provenance check.",
+      "evidence": "willPresent (lines 54-59): `let userInfo = notification.request.content.userInfo` / `if userInfo[\"conductorTask\"] != nil { handleOnce(notification.request.identifier, userInfo); completionHandler([.banner, .list, .sound]); return }`. didReceive (lines 72-77) is identical for the tap. handle (lines 86-95): `guard let id = userInfo[\"conductorTask\"] as? String, let task = TaskStore().get(id) else { return }` ... `module.dispatch(task, manual: false, data: data)`. TaskStore.get (TaskStore.swift:26-28) is a bare id lookup: `readAll().first { ($0[\"id\"] as? String) == id }` — no trigger-type/matchKey gate. Contrast the secured path ConductorAppDelegate.swift:42-51 which requires `($0[\"type\"] as? String) == \"push\"` and `!matchKey.isEmpty && matchKey == key`.",
+      "suggested_fix": "Distinguish app-originated local notifications from remote/foreign ones before doing the id lookup. Two safe options: (a) gate handle() on a private app-only marker that NotificationScheduler stamps (e.g. add `content.userInfo[\"conductorLocal\"] = true` in Schedulers.swift:15, and in handle() require that marker before the id lookup — a remote sender cannot forge the request being a locally-scheduled UNTimeIntervalNotificationTrigger), or (b) detect remote notifications via `notification.request.trigger is UNPushNotificationTrigger` (only true for APNs) and, for those, route through the same push matchKey check used in ConductorAppDelegate (require a `push` trigger with non-empty matchKey == conductorTask) instead of TaskStore().get(id). Either way, no remote-delivered userInfo should ever reach a bare id-based dispatch.",
+      "realVotes": 3
+    },
+    {
+      "title": "Android/iOS asymmetry: Android has no remote id-fire path; iOS does",
+      "severity": "high",
+      "kind": "parity-divergence",
+      "file": "packages/expo-conductor/ios/Triggers/NotificationDelegate.swift",
+      "lines": "86-95",
+      "dimension": "push-security",
+      "claim": "The push security guarantee is enforced symmetrically on the silent-push paths (ConductorMessagingService.kt vs ConductorAppDelegate.swift), but the platforms DIVERGE on the notification surface. On Android the only conductor entry point reachable by a remote message is ConductorMessagingService.onMessageReceived, which handles FCM DATA messages and is fully secured (rejects empty key, requires non-empty matchKey on a `push` trigger, no id-fallback). Android's id-based dispatches (ConductorAlarmReceiver reading intent.getStringExtra(EXTRA_ID), NotificationDisplay's `conductorTask` extra) are driven only by PendingIntents the app itself created — a remote FCM message cannot inject those Intent extras, and an FCM `notification`-payload message tapped in the tray only launches the app's launcher activity, not these receivers. iOS, by contrast, exposes the unsecured id-based ConductorNotificationDelegate.handle to remote APNs notifications (see the critical finding). So the same forged-message attack that is impossible on Android succeeds on iOS — a behavioral and security parity divergence, not merely a code-style one.",
+      "evidence": "Android secured remote path (ConductorMessagingService.kt:30-40): `val key = data[\"conductorTask\"]; if (key.isNullOrEmpty()) return` ... `t.optString(\"type\") == \"push\" && matchKey.isNotEmpty() && matchKey == key`. Android id-based paths are app-PendingIntent-only: ConductorAlarmReceiver.kt:18-20 `override fun onReceive(... intent: Intent) { val id = intent.getStringExtra(EXTRA_ID) ?: return; val task = TaskStore(context).get(id) ?: return }`. iOS unsecured remote-reachable path (NotificationDelegate.swift:87-88): `guard let id = userInfo[\"conductorTask\"] as? String, let task = TaskStore().get(id) else { return }`.",
+      "suggested_fix": "Bring iOS to Android's posture: ensure the ONLY remote-reachable dispatch on iOS goes through the matchKey-gated push path. Apply the fix from the critical finding (provenance marker or UNPushNotificationTrigger detection) so that remote APNs notifications can never reach the bare-id TaskStore().get path, matching Android where no remote id-fire path exists.",
+      "realVotes": 3
+    },
+    {
+      "title": "matchKey type-coercion divergence: Android optString coerces a non-string matchKey, iOS as?String drops it",
+      "severity": "info",
+      "kind": "parity-divergence",
+      "file": "packages/expo-conductor/android/src/main/java/expo/modules/conductor/triggers/ConductorMessagingService.kt",
+      "lines": "37-38",
+      "dimension": "push-security",
+      "claim": "If a stored `push` trigger's matchKey is not a string (e.g. a JSON number 5), Android `t.optString(\"matchKey\")` coerces it to \"5\" and would match a forged conductorTask=\"5\", whereas iOS `$0[\"matchKey\"] as? String` returns nil and never matches. This is a genuine cross-engine behavioral difference, but it is NOT attacker-reachable: matchKey is typed `string?` (ExpoConductor.types.ts:91) and normalization stores triggers verbatim without coercion on all three platforms (normalize.ts:81 `triggers: def.triggers`), so a non-string matchKey can only originate from a developer's own malformed task definition, not from the push sender (who controls only conductorTask). Flagging for parity completeness, not as a security hole.",
+      "evidence": "Android (line 37-38): `val matchKey = t.optString(\"matchKey\")` then `... && matchKey.isNotEmpty() && matchKey == key` — optString returns \"5\" for a numeric JSON value. iOS (ConductorAppDelegate.swift:49-50): `guard ($0[\"type\"] as? String) == \"push\", let matchKey = $0[\"matchKey\"] as? String else { return false }; return !matchKey.isEmpty && matchKey == key` — `as? String` yields nil for a number, so the trigger is skipped.",
+      "suggested_fix": "Optional: align by reading matchKey identically. On Android, use `t.opt(\"matchKey\") as? String` (or check `t.get(\"matchKey\") is String`) instead of optString so a non-string value is ignored, matching iOS. Or validate/coerce matchKey to a string at the normalize boundary on all three engines. Low priority given it is not attacker-controllable.",
+      "realVotes": 3
+    },
+    {
+      "title": "iOS dispatch() advances recurrence on a MANUAL run, diverging from Web and Android",
+      "severity": "high",
+      "kind": "parity-divergence",
+      "file": "packages/expo-conductor/ios/ExpoConductorModule.swift",
+      "lines": "262-310",
+      "dimension": "completeness",
+      "claim": "Swift dispatch() calls advanceRecurrence(task) unconditionally (line 298), so a manual runTaskAsync(id) on a recurring task advances nextRunAt to the next occurrence and reschedules the notification — while Web and Android explicitly leave the schedule untouched on a manual run. A user-triggered run-now therefore silently skips the task's next natural occurrence on iOS only.",
+      "evidence": "Swift (only the policy/budget block is under `if !manual`, then the advance is unconditional):\n```\n    if !manual {\n      let decision = PolicyEngine.evaluate(...)\n      ...\n      if !tryAdmit(id, task, now: now) { ... }\n    }\n    ...\n    advanceRecurrence(task)\n    return true\n```\nWeb gates it: `if (!manual) this.reschedule(task, now);` (WebSchedulerEngine.ts line 354). Kotlin gates it with the explicit parity comment: `// A manual run-now must not advance the task's real schedule (matches the TS engine).` then `if (!manual) advanceRecurrence(task)` (ExpoConductorModule.kt lines 272-273).",
+      "suggested_fix": "Guard the advance on the scheduled path only: replace `advanceRecurrence(task)` with `if !manual { advanceRecurrence(task) }`, matching ExpoConductorModule.kt:273 and WebSchedulerEngine.ts:354.",
+      "realVotes": 3
+    },
+    {
+      "title": "iOS runDueBackgroundTasks fires tasks in store order, not priority order — diverges from Web/Android and the documented contract",
+      "severity": "high",
+      "kind": "parity-divergence",
+      "file": "packages/expo-conductor/ios/ExpoConductorModule.swift",
+      "lines": "153-161",
+      "dimension": "completeness",
+      "claim": "Swift runDueBackgroundTasks() filters due tasks but does NOT sort them before the dispatch loop, whereas Web and Android both sort by priority desc -> nextRunAt asc -> id asc before firing. Because each dispatch() reserves weight in `running` sequentially, iteration order decides who is admitted under budget contention: on iOS a lower-priority task can consume the budget first and defer (DEFERRED_BY_BUDGET) a higher-priority task — the opposite of the documented 'fire highest-priority-first so the shared budget is allocated fairly' behavior the other two engines implement.",
+      "evidence": "Swift:\n```\n    let due = store.all().filter { Self.isDue($0, now: now) }\n    var fired = 0\n    for task in due where dispatch(task, manual: false) { fired += 1 }\n```\nWeb sorts before firing (WebSchedulerEngine.ts 159-168): `.sort((a,b)=>{ if (a.priority!==b.priority) return b.priority-a.priority; ...})`. Kotlin sorts before firing (ExpoConductorModule.kt 80-83): `.sortedWith(compareByDescending<...>{ it.optInt(\"priority\",0) }.thenBy { it.optLong(\"nextRunAt\") }.thenBy { it.optString(\"id\") })`.",
+      "suggested_fix": "Sort `due` before the loop to match the other engines, e.g. `let due = store.all().filter { Self.isDue($0, now: now) }.sorted { a, b in let pa = (a[\"priority\"] as? Int) ?? 0; let pb = (b[\"priority\"] as? Int) ?? 0; if pa != pb { return pa > pb }; let na = (a[\"nextRunAt\"] as? Int) ?? 0; let nb = (b[\"nextRunAt\"] as? Int) ?? 0; if na != nb { return na < nb }; return ((a[\"id\"] as? String) ?? \"\") < ((b[\"id\"] as? String) ?? \"\") }`.",
+      "realVotes": 3
+    },
+    {
+      "title": "policy.retry (maxAttempts/backoffMs/maxBackoffMs) is a three-way divergence: honored on Web, replaced by a fixed 30s on Android, ignored on iOS",
+      "severity": "high",
+      "kind": "parity-divergence",
+      "file": "packages/expo-conductor/ios/ExpoConductorModule.swift",
+      "lines": "132-143",
+      "dimension": "completeness",
+      "claim": "The retry/backoff policy is implemented ONLY in WebSchedulerEngine.handleRetry. ConductorClient.dispatch is a pass-through that reports the result to backend.reportResultAsync. Kotlin reportResultAsync performs no retry for JS handlers (and native handlers get WorkManager's hard-coded EXPONENTIAL/30s, ignoring the configured backoffMs/maxBackoffMs/maxAttempts). Swift reportResultAsync performs no retry at all. So a task with policy.retry={maxAttempts:3, backoffMs:1000, maxBackoffMs:60000} retries with exponential backoff on Web, retries at a fixed 30s base (native handlers only) on Android, and never retries on iOS.",
+      "evidence": "Swift reportResultAsync only emits, never retries:\n```\n      self.emit(\"onTaskComplete\", [ \"taskId\": id, \"result\": result, ... ])\n```\nKotlin reportResultAsync comment is explicit: `// a JS-handler FAILED result is NOT retried by the OS here` and uses a constant backoff in schedule(): `.setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)` (line 171). Web honors the config (WebSchedulerEngine.ts 405-425): `const backoff = Math.min(retry.backoffMs * 2 ** (attempt - 1), retry.maxBackoffMs ?? Number.MAX_SAFE_INTEGER);`. ConductorClient is a pass-through (Conductor.ts 181/184): `await this.backend.reportResultAsync(payload.taskId, result);`.",
+      "suggested_fix": "Either (a) document that policy.retry is a Web-only / app-alive-only feature in CLAUDE.md and the public type, and have ConductorClient drive retry itself (it already owns the JS handler registry and could re-dispatch with backoff so all three platforms behave identically), or (b) port handleRetry's backoff math into Kotlin/Swift reportResultAsync for JS handlers. Today the behavior silently differs per platform for the same task definition.",
+      "realVotes": 3
+    },
+    {
+      "title": "iOS headless path drops recurring notification tasks with a JS handler that Android re-arms (cold-start parity gap)",
+      "severity": "medium",
+      "kind": "parity-divergence",
+      "file": "packages/expo-conductor/ios/ExpoConductorModule.swift",
+      "lines": "183-200",
+      "dimension": "completeness",
+      "claim": "Swift dispatchHeadless returns immediately for any non-native handler, so a recurring task with a JS handler AND a notification trigger neither posts its notification nor re-arms its recurrence when the app is woken headless — the occurrence is silently lost until a foreground launch. Android's dispatchHeadless, by contrast, shows the notification and re-arms the recurrence for exactly that case (JS handler + notification trigger), so the same task definition behaves differently across platforms at cold start.",
+      "evidence": "Swift bails out before any notification/re-arm work:\n```\n  static func dispatchHeadless(_ task: [String: Any], data: [String: Any]) {\n    guard let id = task[\"id\"] as? String,\n          let handler = task[\"handler\"] as? [String: Any],\n          (handler[\"type\"] as? String) == \"native\" else { return }\n```\nAndroid handles the JS+notification case (ExpoConductorModule.kt 354-373): it shows the notification (`NotificationDisplay.show(...)`) and only returns early when `!isNative && notif == null`, then re-arms: `if (!isNative && notif == null) return; val recurrence = ... ; task.put(\"nextRunAt\", next); TaskStore(context).upsert(task); ...`.",
+      "suggested_fix": "Mirror the Android headless logic in Swift: post the notification when the task has a notification trigger regardless of handler type, and re-arm the recurrence whenever the occurrence was meaningfully handled (native handler ran OR a notification was shown). Only return early for a pure JS handler with no notification, matching ExpoConductorModule.kt:354-373.",
+      "realVotes": 3
+    }
+  ],
+  "gaps": [
+    "src/web/normalize.ts registration-boundary rejection: examined — cron rejection at normalize boundary is Web-only (already a confirmed cron-parity/Android finding); priority/weight/policy defaulting is consistent across all three engines (Priority.DEFAULT=0 matches native default 0).",
+    "Engine registry / TaskStore persistence parity: examined TaskRegistry (localStorage), TaskStore.kt (SharedPreferences, process-wide static LOCK), TaskStore.swift (UserDefaults, static serial queue). The read-modify-write serialization is sound and equivalent on all three; no divergence found.",
+    "Config plugin (plugin/src/index.ts): examined — Android permissions, FCM gradle/manifest gating, iOS UIBackgroundModes + BGTaskSchedulerPermittedIdentifiers. The iOS default identifier com.expoconductor.refresh matches BackgroundScheduler.refreshIdentifier in Schedulers.swift; USE_EXACT_ALARM correctly opt-in. No defect found.",
+    "appState + single-flight web-only paths: examined — explicitly NOT fixture-validated and web-only by design (CLAUDE.md), so no cross-engine parity obligation. No new finding.",
+    "Exact-alarm re-arm: examined — advanceRecurrence re-arms the alarm on Android (line 283) and the headless path re-arms too. Swift advanceRecurrence reschedules via schedule(). Consistent for the recurring path.",
+    "Retry/backoff/expiry policy parity: NEWLY SCRUTINIZED — confirmed three-way divergence (see findings). Expiry/window/policy evaluation itself (Policy.ts/.kt/.swift) is byte-identical across the three engines.",
+    "runDueTasks ordering parity: NEWLY SCRUTINIZED — the fired-COUNT was covered by a prior dimension, but the FIRING ORDER (priority sort) was not. Swift omits the sort (see findings).",
+    "Headless cold-start path parity (dispatchHeadless): NEWLY SCRUTINIZED — Android vs iOS asymmetry for JS+notification recurring tasks (see findings)."
+  ],
+  "must_fix": [
+    {
+      "title": "Android module fails to compile: NotificationDisplay used but not imported",
+      "file": "packages/expo-conductor/android/src/main/java/expo/modules/conductor/ExpoConductorModule.kt:253,359 (import block 13-20)",
+      "fix": "Add `import expo.modules.conductor.triggers.NotificationDisplay` alongside the other triggers imports (lines 18-20). NotificationDisplay is in expo.modules.conductor.triggers; Kotlin does not put a sub-package in the parent's scope, so NotificationDisplay.show(...) at lines 253 and 359 is an unresolved reference and the whole module fails to compile. This is the single compile blocker for the Android build in TODO.md section 1."
+    },
+    {
+      "title": "iOS notification delegate fires arbitrary tasks by id from a forged APNs push (security; same fix closes the Android/iOS parity gap)",
+      "file": "packages/expo-conductor/ios/Triggers/NotificationDelegate.swift:54-95 (stamp point Schedulers.swift:15)",
+      "fix": "willPresent/didReceive gate only on userInfo[\"conductorTask\"] != nil, then handle() does a bare TaskStore().get(id) dispatch with no push-trigger/matchKey check — so a remote {\"aps\":{\"alert\":\"x\"},\"conductorTask\":\"<id>\"} fires any task on foreground delivery or tap. Distinguish local from remote: (a) stamp content.userInfo[\"conductorLocal\"]=true in Schedulers.swift:15 and require that marker in handle() before the id lookup, OR (b) for notification.request.trigger is UNPushNotificationTrigger, route through the same matchKey check used in ConductorAppDelegate.didReceiveRemoteNotification (lines 46-52). This one fix closes BOTH finding 12 (security) and finding 14 (the Android-has-no-remote-id-path / iOS-does parity divergence)."
+    },
+    {
+      "title": "Malformed cron rejected only on Web; native silently accepts (or fires) it",
+      "file": "packages/expo-conductor/src/Conductor.ts:62-77 (schedule/defineTaskDefinition); native TaskMapper.kt:70 / TaskMapper.swift:78-79",
+      "fix": "schedule() and defineTaskDefinition() pass the definition straight to backend.registerTaskAsync with no validation; assertValidRecurrence/isValidCronExpression runs only inside the Web backend's normalize. Call assertValidRecurrence in ConductorClient.schedule/defineTaskDefinition BEFORE backend.registerTaskAsync so the guard is platform-agnostic (this also subsumes finding 11, the Android normalize gap). NOTE: this does NOT fix finding 3 — `*/3000000000` passes isValidCronExpression, so the engine-level step-width fix (finding 3) is still needed separately."
+    },
+    {
+      "title": "iOS dispatch lacks the not-yet-due gate: background+recurrence tasks over-fire every BGTask wake and inflate the fired count",
+      "file": "packages/expo-conductor/ios/ExpoConductorModule.swift:154-168 (isDue), 262-300 (dispatch)",
+      "fix": "isDue treats any task with a background trigger as due regardless of nextRunAt, and dispatch's `if !manual` block has no not-yet-due check (Kotlin gates at ExpoConductorModule.kt:214-217; Web filters nextRunAt<=now). Add to the top of the Swift `if !manual` block: `if let n = task[\"nextRunAt\"] as? Int, now < n { return false }`. A pure background-only task has nextRunAt==nil and still passes; a background+recurrence task is then gated like the other platforms."
+    },
+    {
+      "title": "Native runDueTasks() ignores paused: Android/iOS fire and return nonzero while paused (Web returns 0)",
+      "file": "packages/expo-conductor/ios/ExpoConductorModule.swift:154-161,262-278; android ExpoConductorModule.kt:77-86,207-244",
+      "fix": "Web short-circuits `if (this.paused) return 0` (WebSchedulerEngine.ts:156); neither Kotlin runDueTasksAsync nor Swift runDueBackgroundTasks (nor their dispatch paths) checks paused, even though both headless paths do. Add an early paused guard to both live entry points (Kotlin runDueTasksAsync, Swift runDueBackgroundTasks) returning 0 when paused. Shares the iOS dispatch paused-gate with finding 8."
+    },
+    {
+      "title": "iOS foreground-notification dedup permanently stalls sub-30s recurrences",
+      "file": "packages/expo-conductor/ios/Triggers/NotificationDelegate.swift:20-39 (and Schedulers.swift:18)",
+      "fix": "Notifications are one-shot (repeats:false, Schedulers.swift:18) re-armed via advanceRecurrence, but the 30s dedup window's comment assumes a non-existent 60s repeat interval. For any recurrence < 30s (the demo uses 5s, App.tsx:87), the genuine next occurrence falls in the window, handleOnce returns BEFORE handle()/advanceRecurrence(), and the chain dies after occurrence #2. Fix: include the notification delivery timestamp in the dedup key, or clear lastHandledAt[id] in advanceRecurrence when a new notification is armed; and fix the misleading comment. (If you instead shrink the window, also enforce a minimum interval in normalize across all three engines.)"
+    },
+    {
+      "title": "Paused conductor still runs tasks on iOS via the live BGTask/notification dispatch path",
+      "file": "packages/expo-conductor/ios/ExpoConductorModule.swift:106-113,154-161,262-278",
+      "fix": "dispatch()'s `if !manual` block checks policy+budget but never paused, and pauseAsync only cancels local notifications (unschedule->NotificationScheduler.cancel), never the BGTaskScheduler request — so a real background wake or a tapped tray notification runs work after pause. Android has no such leak (ConductorWorker checks isPaused). Add to the top of the Swift `if !manual` block: `if paused { emit(\"onTaskSkipped\", [\"taskId\": id, \"reason\": \"PAUSED\"]); return false }` (manual runTaskAsync still works). Also have pauseAsync cancel the pending BGTask request and resumeAsync re-submit it. Shares the gate with finding 5."
+    },
+    {
+      "title": "One-time tasks never cleared from nextRunAt on Android, causing repeated re-fires",
+      "file": "packages/expo-conductor/android/src/main/java/expo/modules/conductor/ExpoConductorModule.kt:77-86,277-286",
+      "fix": "advanceRecurrence early-returns for non-recurring tasks (line 278) and never clears nextRunAt, so a fired one-shot keeps its now-past nextRunAt and runDueTasksAsync (filter nextRunAt<=now) re-dispatches it on every tick. Web sets nextRunAt over future-only triggers (-> null) so it fires once. In dispatch's non-manual path, when recurrence is null, recompute nextRunAt from still-future triggers (mirror computeNextRunAt/futureTriggers) and persist JSONObject.NULL. This is the main Android runtime divergence once the module compiles."
+    },
+    {
+      "title": "iOS dispatch advances recurrence on a MANUAL run, skipping the next natural occurrence",
+      "file": "packages/expo-conductor/ios/ExpoConductorModule.swift:262-310",
+      "fix": "Swift calls advanceRecurrence(task) unconditionally at line 298, so runTaskAsync(id) (run-now) advances nextRunAt and reschedules — while Web (WebSchedulerEngine.ts:354 `if (!manual) this.reschedule`) and Kotlin (ExpoConductorModule.kt:273 `if (!manual) advanceRecurrence`) leave the schedule untouched. Change line 298 to `if !manual { advanceRecurrence(task) }`."
+    },
+    {
+      "title": "iOS runDueBackgroundTasks fires in store order, not priority order",
+      "file": "packages/expo-conductor/ios/ExpoConductorModule.swift:153-161",
+      "fix": "Swift filters due tasks but does not sort before the sequential dispatch loop; because each dispatch reserves budget in `running`, store order decides admission under contention, so a low-priority task can starve a high-priority one. Web (WebSchedulerEngine.ts:162-168) and Kotlin (ExpoConductorModule.kt:81-83) sort priority-desc -> nextRunAt-asc -> id-asc before firing. Sort `due` the same way before the loop."
+    },
+    {
+      "title": "policy.retry is a three-way divergence: honored on Web, fixed 30s on Android (native handlers only), ignored on iOS",
+      "file": "packages/expo-conductor/ios/ExpoConductorModule.swift:132-143 (and android reportResultAsync / schedule:171)",
+      "fix": "Retry/backoff is implemented only in WebSchedulerEngine.handleRetry (lines 405-425, honoring backoffMs/maxBackoffMs/maxAttempts). Kotlin reportResultAsync does not retry JS handlers and uses a hard-coded EXPONENTIAL/30s for native (line 171); Swift reportResultAsync never retries. Either drive retry centrally in ConductorClient (it owns the JS handler registry and could re-dispatch with backoff for all platforms) OR port handleRetry's backoff math into Kotlin/Swift; at minimum document policy.retry as app-alive/Web-only in the public type and CLAUDE.md so the same task definition does not silently behave three different ways."
+    }
+  ],
+  "should_fix": [
+    "Finding 2 (cron-parity, medium): Kotlin Recurrence.kt:31 String.toIntOrNull accepts Unicode Nd digits ('٣','３') while Swift Int(_:) and JS \\d are ASCII-only, so '٣ * *' throws on Web, never fires on Swift, fires at minute 3 on Kotlin. Guard each token with ^[+-]?[0-9]+$ before toIntOrNull in both the comma-list (line 31) and the */ step branch (line 25), so all three engines accept the same ASCII-only token set the comment claims.",
+    "Finding 3 (cron-parity, low): a */n step between 2^31 and 2^63 overflows Kotlin Int32 (toIntOrNull -> null -> never matches) but is finite on Swift Int64 and JS double (matches minute 0). NOT fixed by the finding-1 boundary validation. Either parse the step as Long on Kotlin (toLongOrNull) or, preferred, reject step > 59 in isValidCronField/matchCronField on all three engines.",
+    "Finding 6 (rundue-count, medium): a throwing Kotlin native handler inside runDueTasksAsync's `due.count { dispatch(...) }` aborts the batch and rejects the promise (no count), while Swift's handler type cannot throw and TS runs JS handlers async. Wrap the Kotlin handler?.run(...) in dispatch in try/catch, report FAILED, and still return true so the fired count stays well-defined.",
+    "Finding 11 (android-glue, low): Android TaskMapper.normalize does no cron validation, so a malformed cron silently never fires (Web throws). Subsumed by fixing finding 1 at the ConductorClient boundary; otherwise add an isValidCronExpression check in TaskMapper.normalize, or document the throw as TS-only.",
+    "Finding 13 (push-security, info): a non-string stored matchKey is coerced by Android optString (\"5\") but dropped by iOS as?String (nil), a behavioral difference. NOT attacker-reachable (matchKey is developer-controlled, not push-sender-controlled). Optionally read matchKey identically (Android: opt(\"matchKey\") as? String) for parity completeness.",
+    "Finding 18 (completeness, medium): Swift dispatchHeadless returns early for any non-native handler (line 186), so a recurring JS-handler+notification task neither posts its notification nor re-arms at cold start, while Android (ExpoConductorModule.kt:354-373) shows the notification and re-arms. Mirror the Android headless logic in Swift: post the notification regardless of handler type and re-arm when the occurrence was meaningfully handled (native ran OR notification shown)."
+  ],
+  "verdict": "serious-issues"
+}

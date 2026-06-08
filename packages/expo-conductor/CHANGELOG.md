@@ -7,6 +7,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-08
+
+A second audit pass — a multi-agent **static** review of the 0.1.1 changes (see
+`docs/review-0.1.1.md`) — surfaced 18 confirmed issues: cross-engine parity divergences, native
+correctness bugs, and two criticals (an Android compile error and an iOS forged-push id-fire).
+All are fixed here.
+
+> Note: the engine fixes (cron step bound, ASCII-digit parity, `ConductorClient` cron validation)
+> are **verified** — TS Jest + Swift `swift test` + the Kotlin JVM harness all pass against the
+> shared fixtures, including new cases. The native **module / delegate / trigger** fixes compile
+> only in a full app build (no Android SDK / CocoaPods in the audit environment), so they are
+> written and reviewed but **not yet compiled**. See `TODO.md` section 1.
+
+### Fixed
+
+- **Cron validation is platform-agnostic.** `ConductorClient.schedule` / `defineTaskDefinition`
+  validate the recurrence before handing it to the backend, so a malformed cron throws at
+  registration on **every** platform. Previously only the Web backend's `normalize` rejected it;
+  native silently accepted — or, for some expressions (e.g. a trailing comma), silently *fired* it.
+- **Cron `*/n` step is bounded to `1..59` on all three engines** instead of diverging: an
+  out-of-range step overflowed Kotlin's 32-bit Int (→ never fired) while Web/Swift fired at value 0.
+- **Cron tokens are ASCII-digit-only on all three engines.** Kotlin's `toIntOrNull` accepted
+  Unicode decimal digits (e.g. `٣`) — firing where Web threw and Swift never fired; it now gates
+  tokens on an ASCII pattern to match JS `\d` and Swift `Int(_:)`.
+- **iOS:** background+recurrence tasks no longer fire on every BGTask wake — `dispatch` gates on
+  the computed `nextRunAt` (matching Web/Android), honoring the interval and keeping `runDueTasks()`
+  fired-count accurate.
+- **iOS + Android:** `runDueTasks()` returns 0 and fires nothing while **paused** (matching Web);
+  previously a background tick fired due tasks and returned nonzero while paused. `runDueTasks()`
+  also excludes pure-background tasks (no `nextRunAt`) from its fired-count to match Web/Android —
+  those still run on a real OS background wake.
+- **iOS + Android:** `dispatch` skips while **paused**, so an FCM push or in-tray alarm arriving
+  during a pause no longer fires (it did on Android before; iOS also cancels the pending BGTask
+  refresh on `pauseAsync`). Manual `runNow` still fires while paused.
+- **iOS:** the foreground-notification dedup no longer permanently stalls sub-30s recurrences. It
+  keys on the notification identifier **plus delivery time** (collapsing the willPresent+didReceive
+  of one delivery) instead of a fixed 30s window that suppressed the genuine next occurrence and
+  killed the re-arm chain.
+- **iOS:** `runDueBackgroundTasks` fires due tasks in **priority order** (priority desc, nextRunAt,
+  then id by UTF-16 code unit) like Web/Android, so a low-priority task can't starve a
+  higher-priority one under budget contention.
+- **iOS:** a manual `runNow` no longer advances the task's real schedule (it did, skipping the next
+  natural occurrence); the advance is gated on the scheduled path, matching Web/Android.
+- **iOS:** the headless cold-start path re-arms a recurring **JS-handler + notification** task
+  (it previously returned early for any non-native handler, silently dropping the chain).
+- **iOS + Android:** a fired **one-shot** task clears its `nextRunAt` (recomputed over still-future
+  triggers) so `runDueTasks()` no longer re-dispatches it on every tick (Web fires it once).
+- **Android:** the module now imports `triggers.NotificationDisplay` — it was used unqualified, an
+  unresolved reference that broke compilation.
+- **Android:** a throwing **native** handler no longer aborts the whole `runDueTasks()` batch — it
+  is reported failed and the batch continues.
+- **Security (iOS):** a forged remote (APNs) push that merely carries a `conductorTask` can no
+  longer fire arbitrary tasks by id on display/tap. The notification delegate dispatches by id only
+  for app-scheduled **local** notifications, identified by the **OS-set trigger class** — a
+  `UNPushNotificationTrigger` is remote and is forwarded, never dispatched — which a sender cannot
+  forge (the `conductorLocal` userInfo hint is NOT a security boundary, since APNs delivers arbitrary
+  custom keys). Remote pushes that legitimately drive tasks still go through the `matchKey`-gated push
+  path. This also closes the Android/iOS asymmetry (Android already had no remote id-fire path).
+- **iOS + Android:** a task with BOTH a recurrence and a still-future one-shot trigger now reschedules
+  to whichever fires first (`min`), matching the Web engine — previously the natives advanced to the
+  recurrence only and dropped the sooner one-shot occurrence.
+- **Android:** a non-string stored push `matchKey` is ignored (read as a `String`, mirroring iOS)
+  rather than coerced by `optString`, for cross-engine parity.
+
+### Changed
+
+- **`policy.retry`** is now documented as intentionally per-platform: fully honored by the Web
+  engine and by JS handlers while the app is alive; native handlers rely on OS retry (Android
+  WorkManager exponential backoff — not the configured values; iOS BGTask: none). See the
+  `RetryPolicy` doc comment.
+
 ## [0.1.1] - 2026-06-07
 
 A doc-driven, three-engine audit (Android / iOS / Web verified against the Expo SDK 56,
@@ -106,6 +177,7 @@ cannot run after the app is terminated (use a **native** handler for headless wo
 native `BGTaskScheduler` / `WorkManager` ↔ `expo-background-task` swap is deferred pending
 on-device verification.
 
-[Unreleased]: https://github.com/herklos/expo-conductor/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/herklos/expo-conductor/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/herklos/expo-conductor/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/herklos/expo-conductor/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/herklos/expo-conductor/releases/tag/v0.1.0

@@ -11,12 +11,12 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import expo.modules.conductor.engine.PolicyEngine
-import expo.modules.conductor.engine.RecurrenceEngine
 import expo.modules.conductor.engine.ResourceWeight
 import expo.modules.conductor.engine.WeightEngine
 import expo.modules.conductor.storage.TaskStore
 import expo.modules.conductor.triggers.ConductorAlarmReceiver
 import expo.modules.conductor.triggers.ConductorWorker
+import expo.modules.conductor.triggers.NotificationDisplay
 import expo.modules.conductor.triggers.TaskMapper
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -75,6 +75,9 @@ class ExpoConductorModule : Module() {
     }
 
     AsyncFunction("runDueTasksAsync") {
+      // Respect pause: a background tick (expo-background-task) must fire nothing and report 0
+      // while paused, matching WebSchedulerEngine.runDueTasksAsync (`if (this.paused) return 0`).
+      if (paused) return@AsyncFunction 0
       val now = System.currentTimeMillis()
       val due = store.all()
         .filter { !it.isNull("nextRunAt") && it.optLong("nextRunAt") <= now }
@@ -208,6 +211,13 @@ class ExpoConductorModule : Module() {
     val id = task.optString("id")
 
     if (!manual) {
+      // Respect pause: a remote FCM push or an in-tray alarm reaches dispatch even while paused
+      // (pauseAsync only unschedules local work), so skip here to match iOS/Web "nothing fires
+      // while paused". Manual run-now (the `manual` branch) still fires.
+      if (paused) {
+        emitSkipped(id, "PAUSED")
+        return false
+      }
       // Periodic WorkManager ticks at most every 15 min, so a daily/weekly/cron (or any
       // interval > 15 min) recurrence must be gated on its computed nextRunAt — otherwise
       // it would fire on every tick. Not-yet-due ticks are a no-op (the worker succeeds).
@@ -264,23 +274,40 @@ class ExpoConductorModule : Module() {
     // Native handlers run immediately on the native side without crossing into JS.
     if (handlerType == "native") {
       val handler = nativeHandlers[handlerName]
-      val result = handler?.run(id, data) ?: "noData"
+      val result = try {
+        handler?.run(id, data) ?: "noData"
+      } catch (e: Throwable) {
+        // A throwing native handler must NOT abort the whole runDueTasksAsync batch (which has
+        // already counted this task as fired) — report it failed and continue. Swift's handler
+        // type can't throw and the JS engine runs handlers async, so only Android needed this.
+        emit("onTaskError", mapOf(
+          "taskId" to id, "error" to (e.message ?: e.toString()),
+          "firedAt" to System.currentTimeMillis(), "attempt" to 1, "triggerType" to "background",
+        ))
+        "failed"
+      }
       running.remove(id) // completed synchronously
       emitComplete(id, result)
     }
 
     // A manual run-now must not advance the task's real schedule (matches the TS engine).
-    if (!manual) advanceRecurrence(task)
+    if (!manual) reschedule(task)
     return true
   }
 
-  private fun advanceRecurrence(task: JSONObject) {
-    val recurrence = TaskMapper.recurrence(task) ?: return
-    val next = RecurrenceEngine.nextRun(recurrence, System.currentTimeMillis()) ?: return
-    task.put("nextRunAt", next)
+  /**
+   * Recompute nextRunAt = min(next recurrence, still-FUTURE one-shot triggers), persist (null when
+   * none remain), and re-arm the exact alarm. Mirrors WebSchedulerEngine.reschedule/futureTriggers,
+   * so a task with BOTH a recurrence and a sooner one-shot honors both, and a fired one-shot with
+   * no future trigger clears (no longer re-dispatched by runDueTasksAsync on every tick).
+   */
+  private fun reschedule(task: JSONObject) {
+    val recurrence = TaskMapper.recurrence(task)
+    val next = TaskMapper.computeNextRunAt(task, recurrence, System.currentTimeMillis(), futureOnly = true)
+    if (next == null) task.put("nextRunAt", JSONObject.NULL) else task.put("nextRunAt", next)
     store.upsert(task)
     // Exact alarms do not self-repeat (unlike periodic WorkManager) — re-arm the next one.
-    if (TaskMapper.hasAlarmTrigger(task)) {
+    if (next != null && TaskMapper.hasAlarmTrigger(task)) {
       ConductorAlarmReceiver.schedule(context, task.optString("id"), next, TaskMapper.allowWhileIdle(task))
     }
   }
@@ -364,8 +391,10 @@ class ExpoConductorModule : Module() {
       // handler with no notification did nothing, so leave nextRunAt to replay on the
       // next foreground launch instead of silently losing the occurrence.
       if (!isNative && notif == null) return
-      val recurrence = TaskMapper.recurrence(task) ?: return
-      val next = RecurrenceEngine.nextRun(recurrence, System.currentTimeMillis()) ?: return
+      // min(next recurrence, future one-shots), matching the live reschedule + Web; null -> nothing
+      // future, so don't re-arm (a fired one-shot is done).
+      val recurrence = TaskMapper.recurrence(task)
+      val next = TaskMapper.computeNextRunAt(task, recurrence, System.currentTimeMillis(), futureOnly = true) ?: return
       task.put("nextRunAt", next)
       TaskStore(context).upsert(task)
       if (TaskMapper.hasAlarmTrigger(task)) {

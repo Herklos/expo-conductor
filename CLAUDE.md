@@ -93,8 +93,17 @@ builds need the Android SDK / Xcode (not required for engine verification).
 - **Permissions & push scoping**: notification/time/alarm triggers need notification
   permission — `Conductor.requestPermissions()` prompts on iOS/web; Android 13+ must be
   prompted from an Activity (or expo-notifications). The `push` trigger matches ONLY tasks
-  that declared a `push` trigger with a matching `matchKey` (no id-fallback) so a forged
-  remote message can't fire arbitrary tasks; treat push `data` as untrusted.
+  that declared a `push` trigger with a matching non-empty `matchKey` (no id-fallback) so a
+  forged remote message can't fire arbitrary tasks; treat push `data` as untrusted. On iOS the
+  *displayed-notification* path (`NotificationDelegate`) dispatches a task by id ONLY for app-scheduled
+  LOCAL notifications, gated on the **OS-set trigger class** (a `UNPushNotificationTrigger` is remote →
+  forwarded, never dispatched) — which a sender CANNOT forge. The `conductorLocal` userInfo key is only
+  a same-process hint to distinguish our local notifications from another lib's; it is NOT a security
+  boundary (APNs delivers arbitrary custom keys), so never gate security on it alone.
+- **`policy.retry` is per-platform** (by design — see the `RetryPolicy` doc comment): the Web engine
+  and a JS handler running while the app is alive honor `maxAttempts`/`backoffMs`/`maxBackoffMs`;
+  native handlers fall back to OS retry (Android WorkManager exponential backoff — NOT the configured
+  values; iOS BGTask: none). Make handlers idempotent.
 - **Web `setTimeout` cap**: delays over ~24.8 days (2^31 ms) overflow, so `scheduleTimer`
   chains timers in <=MAX_TIMER_DELAY hops; the web engine also re-arms persisted tasks in
   its constructor (persistence would otherwise be write-only).

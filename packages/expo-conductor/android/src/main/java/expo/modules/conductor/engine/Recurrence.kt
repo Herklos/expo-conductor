@@ -19,16 +19,27 @@ object RecurrenceEngine {
     return Math.floorMod(epochDay + 4, 7L).toInt()
   }
 
+  // Strict ASCII integer parse: "30" -> 30; "30abc" / "" / "*" / a Unicode decimal digit
+  // (e.g. Arabic-Indic '٣') -> null. Kotlin's String.toIntOrNull accepts ANY Unicode
+  // decimal digit (via Character.digit), which would diverge from JS (ASCII-only \d) and
+  // Swift (ASCII-only Int(_:)). Gating on an ASCII-only pattern first makes all three engines
+  // accept exactly the same cron tokens. (toIntOrNull still returns null on Int32 overflow.)
+  private val asciiInt = Regex("[+-]?[0-9]+")
+  private fun parseIntStrict(token: String): Int? =
+    if (asciiInt.matches(token)) token.toIntOrNull() else null
+
   private fun matchCronField(field: String, value: Int): Boolean {
     if (field == "*") return true
     if (field.startsWith("*/")) {
-      val step = field.substring(2).toIntOrNull() ?: return false
-      return step > 0 && value % step == 0
+      val step = parseIntStrict(field.substring(2)) ?: return false
+      // step bounded to 1..59 (the largest meaningful field value): a larger step is
+      // nonsensical and, unbounded, diverged (Int32 overflow here vs fire-at-0 on Web/Swift).
+      return step in 1..59 && value % step == 0
     }
     // Parse each comma part raw (no trimming): a part can't contain a separator after the
     // field split, and trimming would strip non-ASCII whitespace (NBSP) that Swift/JS keep,
     // re-introducing a cross-engine divergence.
-    return field.split(",").mapNotNull { it.toIntOrNull() }.contains(value)
+    return field.split(",").mapNotNull { parseIntStrict(it) }.contains(value)
   }
 
   private fun nextCron(expression: String, fromMs: Long): Long? {

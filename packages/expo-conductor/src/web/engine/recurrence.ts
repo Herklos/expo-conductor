@@ -45,7 +45,10 @@ function isValidCronField(field: string): boolean {
   if (field === '*') return true;
   if (field.startsWith('*/')) {
     const step = parseIntStrict(field.slice(2));
-    return step != null && step > 0;
+    // Cap the step at the largest meaningful field value (59). A larger step is nonsensical
+    // (only value 0 could ever match) and, left unbounded, diverged across engines: it
+    // overflows Kotlin's 32-bit Int (-> never fires) while Web/Swift kept firing at value 0.
+    return step != null && step > 0 && step <= 59;
   }
   const parts = field.split(',');
   return parts.length > 0 && parts.every((p) => parseIntStrict(p) != null);
@@ -66,7 +69,9 @@ function matchCronField(field: string, value: number): boolean {
   if (field === '*') return true;
   if (field.startsWith('*/')) {
     const step = parseIntStrict(field.slice(2));
-    return step != null && step > 0 && value % step === 0;
+    // step bounded to 1..59 (see isValidCronField): keeps all three engines identical and
+    // avoids Kotlin's Int32 overflow on a huge step.
+    return step != null && step > 0 && step <= 59 && value % step === 0;
   }
   return field.split(',').some((part) => parseIntStrict(part) === value);
 }

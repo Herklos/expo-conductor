@@ -28,7 +28,10 @@ public enum RecurrenceEngine {
   private static func matchCronField(_ field: String, _ value: Int) -> Bool {
     if field == "*" { return true }
     if field.hasPrefix("*/") {
-      guard let step = Int(field.dropFirst(2)), step > 0 else { return false }
+      // step bounded to 1...59 (the largest meaningful field value): a larger step is
+      // nonsensical and, unbounded, diverged (Int32 overflow on Kotlin vs fire-at-0 here).
+      // Int(_:) is ASCII-only, matching JS \d and the Kotlin ASCII guard.
+      guard let step = Int(field.dropFirst(2)), step > 0, step <= 59 else { return false }
       return value % step == 0
     }
     // Parse each comma part raw (no trimming): after splitting fields on ASCII whitespace a

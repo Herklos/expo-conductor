@@ -14,7 +14,7 @@ import { isValidCronExpression, nextRun } from './engine/recurrence';
 import { resolveWeight } from './engine/weight';
 
 /** Derive the recurrence to schedule from explicit recurrence or triggers. */
-function recurrenceFor(def: TaskDefinition): Recurrence | undefined {
+export function recurrenceFor(def: TaskDefinition): Recurrence | undefined {
   if (def.recurrence) return def.recurrence;
   const recurrenceTrigger = def.triggers.find((t) => t.type === 'recurrence');
   return recurrenceTrigger?.type === 'recurrence' ? recurrenceTrigger.recurrence : undefined;
@@ -26,11 +26,11 @@ function recurrenceFor(def: TaskDefinition): Recurrence | undefined {
  * (return null) so cross-platform parity holds; this boundary check is the developer-facing
  * guard. Throws on a cron recurrence whose expression isn't exactly three valid fields.
  */
-function assertValidRecurrence(recurrence: Recurrence | undefined): void {
+export function assertValidRecurrence(recurrence: Recurrence | undefined): void {
   if (recurrence?.kind === 'cron' && !isValidCronExpression(recurrence.expression)) {
     throw new Error(
       `Invalid cron expression "${recurrence.expression}" (expected "minute hour dayOfWeek", ` +
-        `each field "*", "*/<n>", or a comma list of integers)`,
+        `each field "*", "*/<n>" with 1<=n<=59, or a comma list of integers)`,
     );
   }
 }

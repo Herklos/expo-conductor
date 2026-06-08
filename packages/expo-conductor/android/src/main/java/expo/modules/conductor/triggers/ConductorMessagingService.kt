@@ -34,8 +34,12 @@ class ConductorMessagingService : FirebaseMessagingService() {
         val triggers = task.optJSONArray("triggers") ?: return@firstOrNull false
         (0 until triggers.length()).any {
           val t = triggers.getJSONObject(it)
-          val matchKey = t.optString("matchKey")
-          t.optString("type") == "push" && matchKey.isNotEmpty() && matchKey == key
+          // Read matchKey as a String only (mirror iOS `as? String`): a non-string stored
+          // matchKey (e.g. a JSON number) is IGNORED, not coerced — optString would turn 5 into
+          // "5" and could match a forged conductorTask="5". (matchKey is developer-controlled,
+          // so this is cross-engine parity polish, not an attacker-reachable hole.)
+          val matchKey = t.opt("matchKey") as? String
+          t.optString("type") == "push" && !matchKey.isNullOrEmpty() && matchKey == key
         }
       } ?: return
       val module = ExpoConductorModule.INSTANCE

@@ -117,16 +117,27 @@ object TaskMapper {
     return ResourceWeight(w.getDouble("cpu"), w.getDouble("network"), w.getDouble("battery"), w.getDouble("memory"))
   }
 
-  fun computeNextRunAt(task: JSONObject, recurrence: Recurrence?, now: Long): Long? {
+  /**
+   * Earliest concrete fire time from the task's triggers + recurrence. With [futureOnly] the
+   * one-shot triggers (time/notification/alarm) are kept only when their absolute `at` is still
+   * in the future, and relative `inSeconds` ones are dropped (they already fired) — mirroring
+   * WebSchedulerEngine.futureTriggers, so re-computing after a fire clears a spent one-shot.
+   */
+  fun computeNextRunAt(
+    task: JSONObject,
+    recurrence: Recurrence?,
+    now: Long,
+    futureOnly: Boolean = false,
+  ): Long? {
     val candidates = mutableListOf<Long>()
     val triggers = task.optJSONArray("triggers") ?: JSONArray()
     for (i in 0 until triggers.length()) {
       val t = triggers.getJSONObject(i)
       when (t.optString("type")) {
         "time", "notification" ->
-          if (t.has("at")) candidates.add(t.getLong("at"))
-          else if (t.has("inSeconds")) candidates.add(now + t.getLong("inSeconds") * 1000)
-        "alarm" -> if (t.has("at")) candidates.add(t.getLong("at"))
+          if (t.has("at")) { val at = t.getLong("at"); if (!futureOnly || at > now) candidates.add(at) }
+          else if (!futureOnly && t.has("inSeconds")) candidates.add(now + t.getLong("inSeconds") * 1000)
+        "alarm" -> if (t.has("at")) { val at = t.getLong("at"); if (!futureOnly || at > now) candidates.add(at) }
         "recurrence" -> recurrence(JSONObject().put("recurrence", t.optJSONObject("recurrence")))
           ?.let { RecurrenceEngine.nextRun(it, now)?.let(candidates::add) }
       }

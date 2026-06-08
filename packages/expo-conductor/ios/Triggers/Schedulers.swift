@@ -12,7 +12,11 @@ enum NotificationScheduler {
     let content = UNMutableNotificationContent()
     content.title = title ?? "Task"
     if let body = body { content.body = body }
-    content.userInfo = ["conductorTask": id]
+    // `conductorLocal` distinguishes our app-scheduled LOCAL notifications from another library's
+    // when the delegate claims a delivery. It is NOT a security boundary — a remote sender CAN
+    // forge it (APNs delivers arbitrary custom userInfo keys) — so the delegate's real
+    // local-vs-remote gate is the OS-set trigger class (`UNPushNotificationTrigger`), not this key.
+    content.userInfo = ["conductorTask": id, "conductorLocal": true]
 
     let interval = max(1.0, Double(fireAtMs) / 1000.0 - Date().timeIntervalSince1970)
     let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
@@ -63,6 +67,14 @@ enum BackgroundScheduler {
       // Background App Refresh being disabled.
       NSLog("[expo-conductor] BGTaskScheduler.submit failed: \(error.localizedDescription)")
     }
+    #endif
+  }
+
+  /// Cancel any pending background-refresh request (used by pauseAsync so a background wake
+  /// can't run work while paused). resumeAsync re-submits via the normal schedule path.
+  static func cancel() {
+    #if canImport(BackgroundTasks)
+    BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: refreshIdentifier)
     #endif
   }
 }

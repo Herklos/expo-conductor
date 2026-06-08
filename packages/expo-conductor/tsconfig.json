@@ -3,7 +3,11 @@
   "compilerOptions": {
     "outDir": "./build",
     "rootDir": "./src",
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    // Read by ts-jest (transpile-only test transform) and enforced by `tsc`:
+    // guarantees every file is independently transpilable (no cross-file type
+    // erasure surprises). Moved here from jest.config.js per ts-jest's deprecation.
+    "isolatedModules": true
   },
   "include": ["src"],
   "exclude": ["**/__tests__/**", "build"]

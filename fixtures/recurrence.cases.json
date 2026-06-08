@@ -150,6 +150,30 @@
       "spec": { "kind": "cron", "expression": "0 0\f5" },
       "fromMs": 0,
       "expected": null
+    },
+    {
+      "name": "cron: comma-list Unicode digit token never fires (ASCII-only parity across engines)",
+      "spec": { "kind": "cron", "expression": "٣ * *" },
+      "fromMs": 0,
+      "expected": null
+    },
+    {
+      "name": "cron: step > 59 is rejected (never fires)",
+      "spec": { "kind": "cron", "expression": "*/120 * *" },
+      "fromMs": 0,
+      "expected": null
+    },
+    {
+      "name": "cron: huge step (Int32 overflow) never fires on any engine",
+      "spec": { "kind": "cron", "expression": "*/3000000000 * *" },
+      "fromMs": 0,
+      "expected": null
+    },
+    {
+      "name": "cron: step 59 boundary still fires",
+      "spec": { "kind": "cron", "expression": "*/59 * *" },
+      "fromMs": 0,
+      "expected": 3540000
     }
   ]
 }

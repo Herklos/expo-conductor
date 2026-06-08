@@ -18,6 +18,7 @@ import {
   type TaskExecutionContext,
   TaskResult,
 } from './ExpoConductor.types';
+import { assertValidRecurrence, recurrenceFor } from './web/normalize';
 
 export class ConductorClient {
   private handlers = new Map<string, JsTaskHandler>();
@@ -60,6 +61,11 @@ export class ConductorClient {
 
   /** Register (or replace) a task definition with the engine. */
   async defineTaskDefinition(definition: TaskDefinition): Promise<RegisteredTask> {
+    // Validate the recurrence up front so a malformed cron fails fast on EVERY platform.
+    // Previously this guard lived only inside the Web backend's normalize, so native
+    // registration silently accepted (or even fired) an invalid cron. ConductorClient is the
+    // single registration entry point for all backends, so this makes the guard platform-agnostic.
+    assertValidRecurrence(recurrenceFor(definition));
     this.taskHandlerNames.set(definition.id, definition.handler?.name ?? definition.id);
     this.warnIfHandlerMissing(definition);
     return this.backend.registerTaskAsync(definition);
@@ -67,6 +73,7 @@ export class ConductorClient {
 
   /** Convenience: register a JS handler and its task definition together. */
   async schedule(definition: TaskDefinition, handler?: JsTaskHandler): Promise<RegisteredTask> {
+    assertValidRecurrence(recurrenceFor(definition)); // fail fast on a malformed cron, all platforms
     const name = definition.handler?.name ?? definition.id;
     if (handler && (definition.handler?.type ?? 'js') === 'js') {
       this.defineTask(name, handler);

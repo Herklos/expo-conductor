@@ -138,6 +138,22 @@ export interface ExecutionWindow {
   latest?: number;
 }
 
+/**
+ * Retry/backoff for a FAILED task.
+ *
+ * Platform support is intentionally uneven and you should design handlers to be idempotent:
+ * - **Web engine + any JS handler while the app is alive:** fully honored — the in-process
+ *   engine re-runs after `backoffMs` doubled per attempt (capped at `maxBackoffMs`), up to
+ *   `maxAttempts`.
+ * - **Native, JS handler:** retried in-process by the JS engine *only while the app is alive*;
+ *   a FAILED result reported after the OS background slot ended is not OS-retried.
+ *   `maxAttempts`/`backoffMs`/`maxBackoffMs` are not applied by the OS scheduler.
+ * - **Native, native handler:** relies on OS retry — Android WorkManager uses exponential
+ *   backoff (not the values here); iOS BGTask failures are not automatically retried.
+ *
+ * For uniform cross-platform retry, run a JS handler and keep the app alive, or implement
+ * retry inside a native handler.
+ */
 export interface RetryPolicy {
   maxAttempts: number;
   /** Initial backoff in ms; doubled each attempt up to `maxBackoffMs`. */

@@ -122,16 +122,20 @@ enum TaskMapper {
     weight(task["weight"])
   }
 
-  static func computeNextRunAt(_ task: [String: Any], _ recurrence: Recurrence?, _ now: Int) -> Int? {
+  /// Earliest concrete fire time from the task's triggers + recurrence. With `futureOnly` the
+  /// one-shot triggers (time/notification/alarm) are kept only when their absolute `at` is still
+  /// in the future, and relative `inSeconds` ones are dropped (they already fired) — mirroring
+  /// WebSchedulerEngine.futureTriggers, so re-computing after a fire clears a spent one-shot.
+  static func computeNextRunAt(_ task: [String: Any], _ recurrence: Recurrence?, _ now: Int, futureOnly: Bool = false) -> Int? {
     var candidates: [Int] = []
     if let triggers = task["triggers"] as? [[String: Any]] {
       for t in triggers {
         switch t["type"] as? String {
         case "time", "notification":
-          if let at = int(t["at"]) { candidates.append(at) }
-          else if let inSeconds = int(t["inSeconds"]) { candidates.append(now + inSeconds * 1000) }
+          if let at = int(t["at"]) { if !futureOnly || at > now { candidates.append(at) } }
+          else if !futureOnly, let inSeconds = int(t["inSeconds"]) { candidates.append(now + inSeconds * 1000) }
         case "alarm":
-          if let at = int(t["at"]) { candidates.append(at) }
+          if let at = int(t["at"]) { if !futureOnly || at > now { candidates.append(at) } }
         case "recurrence":
           if let r = t["recurrence"] as? [String: Any],
              let rec = parseRecurrence(["recurrence": r]),
