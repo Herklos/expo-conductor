@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-06-08
+
+### Fixed
+
+- **iOS:** a **recurrence-only** task no longer posts a spurious, user-visible local notification
+  (it appeared in the tray titled **"Task"**). On iOS the only way to wake at a wall-clock time is
+  a local notification, and a local notification is *always* user-visible — so the module had been
+  posting a banner for **every** scheduled task with a `nextRunAt`, including `recurrence`-only
+  tasks that never asked for one (the banner fell back to the default title `"Task"`). The module
+  now posts a banner **only** when a trigger warrants one — `notification` (explicitly user-facing,
+  carries `title`/`body`) or `time`/`alarm` (a wall-clock fire where the notification IS the wake).
+  A `recurrence` / `background` / `appState` / `push`-only task is woken **silently** via
+  `BGTaskScheduler` and advanced by the foreground engine instead. This applies on both the live
+  `schedule` path and the headless cold-start re-arm (a native recurrence-only task re-arms its next
+  `BGTaskScheduler` wake rather than posting a banner). Mirrors Android, where a notification is only
+  shown for a `notification` trigger. The new gate (`NotificationPolicy`) is unit-tested directly
+  (`ios/Tests/NotificationPolicyTests.swift`); it is iOS presentation glue, not shared engine math,
+  so it has no `/fixtures` case or Kotlin mirror.
+
 ## [0.2.0] - 2026-06-08
 
 A second audit pass — a multi-agent **static** review of the 0.1.1 changes (see
@@ -177,7 +196,8 @@ cannot run after the app is terminated (use a **native** handler for headless wo
 native `BGTaskScheduler` / `WorkManager` ↔ `expo-background-task` swap is deferred pending
 on-device verification.
 
-[Unreleased]: https://github.com/herklos/expo-conductor/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/herklos/expo-conductor/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/herklos/expo-conductor/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/herklos/expo-conductor/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/herklos/expo-conductor/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/herklos/expo-conductor/releases/tag/v0.1.0
