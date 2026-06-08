@@ -59,28 +59,40 @@ await Conductor.schedule({
 That's the whole loop: **define** the handler once, **schedule** it with a policy, and let the
 engine decide the rest. The sections below unpack each piece.
 
-## How it works — one engine, three times
+## How it works — one engine, three platforms
 
 The orchestration **engine** — recurrence math, priority ordering, weight-based admission control,
-and policy evaluation — is implemented natively in **Kotlin**, **Swift**, and **TypeScript** (for
-web). On a native platform the TypeScript layer is a thin proxy; the decisions are made in the
-platform language, right next to the OS scheduler.
+and policy evaluation — is implemented natively in **Kotlin** (Android), **Swift** (iOS), and
+**TypeScript** (web). On a native platform the TypeScript layer is a thin proxy; decisions are made
+in the platform language, right next to the OS scheduler. The three implementations are kept
+bit-for-bit identical — integer UTC-epoch-millisecond time math and strict `<=` weight comparisons,
+locked down by one shared, language-neutral fixture set in [`/fixtures`](./fixtures).
 
-To guarantee the three implementations behave **identically**, they are all verified against a
-single language-neutral set of fixtures in [`/fixtures`](./fixtures). Every platform's test suite
-(Jest, JUnit, XCTest) loads the *same* cases:
+What the engine can actually *do*, though, depends on the OS underneath it.
 
-| Concern | Fixture | TS (Jest) | Kotlin (JUnit) | Swift (XCTest) |
-| --- | --- | --- | --- | --- |
-| recurrence / schedule | `recurrence.cases.json` | ✅ | ✅ | ✅ |
-| priority vs other tasks | `priority.cases.json` | ✅ | ✅ | ✅ |
-| task weight / budget | `weight-admission.cases.json` | ✅ | ✅ | ✅ |
-| execution policy | `policy.cases.json` | ✅ | ✅ | ✅ |
+**Legend:** ✅ supported · ⚠️ partial / best-effort · ❌ not available · ➖ not applicable
 
-Time math is integer math on UTC epoch milliseconds (no timezone database involved), and resource
-weights use IEEE-754 `double` compared with a strict `<=` — both are bit-for-bit identical across
-JVM, Swift and JS, so the three engines agree exactly. (Engines must compare weights exactly; an
-epsilon-tolerant `<= budget + 1e-9` would diverge.)
+| Capability | Android | iOS | Web |
+| --- | :---: | :---: | :---: |
+| One-shot & recurring schedules (interval / daily / weekly / cron) | ✅ | ✅ | ✅ |
+| Run while the app is alive (JS handler) | ✅ | ✅ | ✅ |
+| Run **after the app is terminated** (native handler) | ✅ | ✅ | ❌ |
+| Deferrable background execution | ✅ | ✅ ¹ | ⚠️ ² |
+| Exact wall-clock alarms | ✅ | ⚠️ ³ | ⚠️ |
+| User-visible notifications | ✅ | ✅ | ❌ |
+| Server-driven push (`push` trigger) | ✅ ⁴ | ✅ | ❌ |
+| `appState` (foreground / background) | ✅ | ✅ | ✅ |
+| Priority + resource-budget admission control | ✅ | ✅ | ✅ |
+| Policy constraints (charging / network / idle / battery / window / expiry) | ✅ | ✅ | ✅ |
+| Single-flight across app instances | ➖ | ➖ | ✅ |
+
+¹ Opportunistic timing; intervals are advisory and it does **not** run on the iOS Simulator.
+² Depends on Periodic Background Sync availability.
+³ iOS has no exact-alarm API — falls back to a scheduled local notification.
+⁴ Requires `enableFcm` in the config plugin (and a Firebase setup).
+
+The OS primitive behind each trigger is in the [Triggers](#triggers) table; see
+**[Platform support & limitations](#platform-support--limitations)** for the full detail.
 
 ## Installation
 
