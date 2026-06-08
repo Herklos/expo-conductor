@@ -10,7 +10,7 @@ and the [shared behavior contract](../../fixtures/README.md).
 ## Quick start
 
 ```ts
-import Conductor, { Priority, TaskResult } from 'expo-conductor';
+import Conductor, { Priority, TaskResult } from '@drakkar.software/expo-conductor';
 
 // Register JS handlers at MODULE scope (not inside a component) so they survive a headless
 // relaunch — same rule as expo-task-manager's defineTask.
