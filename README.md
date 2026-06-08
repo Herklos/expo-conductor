@@ -1,14 +1,35 @@
 # expo-conductor
 
-> Define tasks in an Expo app with rich execution policies and many triggers —
-> priority, resource weight, recurrence and constraints — backed by a **native-first**
-> engine on Android (Kotlin) and iOS (Swift), with a Web implementation.
+> Declarative background work for Expo — **priority, resource budgeting, recurrence, and
+> constraints** — run by a **native-first** engine on iOS (Swift), Android (Kotlin), and Web
+> (TypeScript).
 
-`expo-conductor` is an Expo native module that gives you one declarative way to say
-*“run this work, with this priority and resource cost, under these conditions, on these
-triggers.”* It maps your task definitions onto the right OS scheduler — WorkManager,
-AlarmManager, BGTaskScheduler, local notifications, FCM/APNs push — and decides *when*
-and *whether* each task runs using a shared, heavily-tested decision engine.
+Most schedulers hand you a timer and a callback. `expo-conductor` lets you describe the whole
+*policy* of a job — **when** it may run, **how important** it is, **how expensive** it is, and
+**what conditions** it needs — then maps that onto the right OS primitive (WorkManager,
+AlarmManager, BGTaskScheduler, local notifications, FCM/APNs push) and decides *whether and when*
+each task actually runs, using one shared, heavily-tested decision engine.
+
+### Why reach for it
+
+- **Tasks are data, not callbacks.** Triggers, recurrence, priority, resource weight,
+  retry/backoff, and constraints are all declared on a single task definition — the engine does
+  the orchestration.
+- **Native-first, identical everywhere.** The decision engine is implemented three times
+  (Swift / Kotlin / TypeScript) and verified bit-for-bit against one shared fixture set, so the
+  same task behaves the same on iOS, Android, and Web.
+- **Cross-task admission control.** Tasks compete for a `ResourceBudget` (cpu / network / battery
+  / memory) by priority, so a heavy, low-priority job yields to lighter or more important work
+  instead of everything firing at once.
+- **Many triggers, one model.** `time`, `recurrence` (interval / daily / weekly / cron),
+  `notification`, exact `alarm`, deferrable `background`, `push` (FCM / APNs), and `appState`.
+- **JS *or* native handlers.** Run work in JS while the app is alive, or in a native handler that
+  survives a headless cold start.
+- **Single-flight across instances.** Elect one leader so two browser tabs (or a tab + an
+  Electron shell) don't double-fire the same recurring job.
+- **Batteries included.** An Expo config plugin wires permissions, the FCM service, BGTask
+  identifiers, and exact-alarm flags; optional first-party bridges to `expo-task-manager` and
+  `expo-notifications` extend it further.
 
 ```ts
 import Conductor, { Priority, TaskResult } from 'expo-conductor';
@@ -35,16 +56,19 @@ await Conductor.schedule({
 });
 ```
 
-## Why "native-first"?
+That's the whole loop: **define** the handler once, **schedule** it with a policy, and let the
+engine decide the rest. The sections below unpack each piece.
 
-The orchestration **engine** — recurrence math, priority ordering, weight-based
-admission control and policy evaluation — is implemented natively three times:
-**Kotlin**, **Swift** and **TypeScript** (for web). The TS layer on a native platform is a
-thin proxy; the decisions are made in the platform language, close to the OS scheduler.
+## How it works — one engine, three times
 
-To guarantee these three implementations behave **identically**, they are all verified
-against a single language-neutral set of fixtures in [`/fixtures`](./fixtures). Every
-platform’s test suite (Jest, JUnit, XCTest) loads the *same* cases:
+The orchestration **engine** — recurrence math, priority ordering, weight-based admission control,
+and policy evaluation — is implemented natively in **Kotlin**, **Swift**, and **TypeScript** (for
+web). On a native platform the TypeScript layer is a thin proxy; the decisions are made in the
+platform language, right next to the OS scheduler.
+
+To guarantee the three implementations behave **identically**, they are all verified against a
+single language-neutral set of fixtures in [`/fixtures`](./fixtures). Every platform's test suite
+(Jest, JUnit, XCTest) loads the *same* cases:
 
 | Concern | Fixture | TS (Jest) | Kotlin (JUnit) | Swift (XCTest) |
 | --- | --- | --- | --- | --- |
@@ -53,33 +77,19 @@ platform’s test suite (Jest, JUnit, XCTest) loads the *same* cases:
 | task weight / budget | `weight-admission.cases.json` | ✅ | ✅ | ✅ |
 | execution policy | `policy.cases.json` | ✅ | ✅ | ✅ |
 
-Time math is integer math on UTC epoch milliseconds (no timezone database involved), and
-resource weights use IEEE-754 `double` compared with a strict `<=` — both are bit-for-bit
-identical across JVM, Swift and JS, so the three engines agree exactly. (Engines must
-compare weights exactly; an epsilon-tolerant `<= budget + 1e-9` would diverge.)
+Time math is integer math on UTC epoch milliseconds (no timezone database involved), and resource
+weights use IEEE-754 `double` compared with a strict `<=` — both are bit-for-bit identical across
+JVM, Swift and JS, so the three engines agree exactly. (Engines must compare weights exactly; an
+epsilon-tolerant `<= budget + 1e-9` would diverge.)
 
-## Monorepo layout
-
-```
-expo-conductor/
-├── fixtures/                     # shared cross-platform behavior cases (source of truth)
-├── packages/expo-conductor/      # the Expo native module
-│   ├── src/                      # TS proxy, types, public API, Web engine + Jest tests
-│   ├── android/                  # Kotlin engine + module + triggers (+ JVM test harness)
-│   ├── ios/                      # Swift engine + module + triggers (+ SwiftPM/XCTest)
-│   └── plugin/                   # config plugin (permissions, manifest, BGTask ids, FCM)
-└── apps/demo/                    # Expo app demonstrating every feature
-```
-
-## Install
-
-This module is developed in a pnpm monorepo. To use it in your own app:
+## Installation
 
 ```sh
 npx expo install expo-conductor
 ```
 
-Then add the config plugin to `app.json`:
+Then add the config plugin to `app.json` — it sets up the Android permissions and FCM service, the
+iOS background modes and BGTask identifiers, and the exact-alarm flags for you:
 
 ```json
 {
@@ -91,7 +101,15 @@ Then add the config plugin to `app.json`:
 }
 ```
 
+`expo-conductor` ships native code, so it needs a [development build](https://docs.expo.dev/develop/development-builds/introduction/)
+(or a bare/prebuilt project) — it won't run in Expo Go.
+
 ## Core concepts
+
+A **task** is a serializable definition: an `id`, one or more **triggers**, an optional
+**recurrence**, a **priority** and **resource weight**, and an execution **policy**. You attach a
+**handler** (JS or native) that does the actual work. The rest of this section walks through each
+field.
 
 ### Triggers
 
@@ -116,6 +134,8 @@ are de-duplicated to a single transition.
 
 ### Recurrence
 
+Four recurrence shapes cover most schedules:
+
 ```ts
 { kind: 'interval', everyMs: 900000, anchor?: 0 }
 { kind: 'daily',    hour: 9, minute: 30 }
@@ -123,25 +143,22 @@ are de-duplicated to a single transition.
 { kind: 'cron',     expression: '30 9 *' /* minute hour dayOfWeek */ }
 ```
 
-A cron `expression` is exactly three whitespace-separated fields (`minute hour dayOfWeek`),
-each `*`, `*/<n>`, or a comma list of integers. An invalid expression is rejected when the
-task is scheduled (so a typo surfaces immediately rather than silently never firing). The
-three engines parse cron identically (ASCII-whitespace separators, strict integer tokens).
+A cron `expression` is exactly three whitespace-separated fields (`minute hour dayOfWeek`), each
+`*`, `*/<n>` (with `1 ≤ n ≤ 59`), or a comma list of integers. An invalid expression is **rejected
+at `schedule()` time on every platform** — a typo throws immediately instead of silently never
+firing. All three engines parse cron identically: ASCII-whitespace separators and strict
+ASCII-integer tokens.
 
 ### Priority & resource weight
 
-The engine **orders by priority** (higher first, then earliest-due, then id) and
-**admits** tasks greedily against a `ResourceBudget`, deferring (skip-over) any that would
-exceed a dimension — this is how a heavy, low-priority task yields to lighter or more
-important ones. Admission also accounts for the budget **and count already consumed by
-tasks currently running**, and honors each task's `policy.maxConcurrent`, so a task is
-deferred when the device is already busy. When a fired task can't be admitted it emits
-`onTaskSkipped` with reason `DEFERRED_BY_BUDGET` and is retried shortly (it does not lose
-its turn). The admission algorithm is verified across all platforms by the shared fixtures.
-
-Cross-task budgeting is fully realized in the Web engine and within a live native process;
-after a headless cold-start the native "running" set starts empty (each OS-triggered task
-is admitted against whatever else is running in that process).
+This is the heart of the engine. It **orders tasks by priority** (higher first, then earliest-due,
+then id) and **admits** them greedily against a `ResourceBudget`, skipping any that would blow a
+dimension — that's how a heavy, low-priority task yields to lighter or more important ones.
+Admission also accounts for the budget **and count already consumed by tasks currently running**,
+and honors each task's `policy.maxConcurrent`, so a task is deferred when the device is already
+busy. When a fired task can't be admitted it emits `onTaskSkipped` with reason
+`DEFERRED_BY_BUDGET` and is retried shortly — it doesn't lose its turn. The admission algorithm is
+verified across all platforms by the shared fixtures.
 
 ```ts
 Conductor.setResourceBudget({ cpu: 1, network: 1, battery: 1, memory: 1 });
@@ -154,10 +171,15 @@ await Conductor.schedule({
 });
 ```
 
-`weight` accepts a preset (`'light' | 'moderate' | 'heavy'`) or explicit dimensions
-(each `0..1`).
+`weight` accepts a preset (`'light' | 'moderate' | 'heavy'`) or explicit dimensions (each `0..1`).
+
+> **Scope:** cross-task budgeting is fully realized in the Web engine and within a live native
+> process. After a headless cold start the native "running" set starts empty — each OS-triggered
+> task is admitted against whatever else is running in that same process.
 
 ### Execution policy & constraints
+
+Constraints gate *whether* a task may run; retry governs *what happens on failure*:
 
 ```ts
 policy: {
@@ -175,15 +197,20 @@ policy: {
 }
 ```
 
-If a constraint isn’t met when a task fires, it is **skipped** (with a reason emitted on
+If a constraint isn't met when a task fires, it is **skipped** (with a reason emitted on
 `onTaskSkipped`) and rescheduled for its next occurrence.
+
+> **`retry` is intentionally per-platform.** It is fully honored by the Web engine and by JS
+> handlers while the app is alive; native handlers fall back to OS retry (Android WorkManager's
+> exponential backoff — not the configured values; iOS BGTask isn't auto-retried). Design handlers
+> to be idempotent.
 
 ### Single-flight (cross-instance leader election)
 
-When several app instances of the same origin run the same task — two browser tabs, or a
-tab plus an Electron shell sharing one account — a recurring or `appState` task would fire
-in *each*, double-posting a webhook or double-replying to a command. `policy.singleFlight`
-elects **one leader**; only the holder fires, the others defer:
+When several app instances of the same origin run the same task — two browser tabs, or a tab plus
+an Electron shell sharing one account — a recurring or `appState` task would fire in *each*,
+double-posting a webhook or double-replying to a command. `policy.singleFlight` elects **one
+leader**; only the holder fires, the others defer:
 
 ```ts
 await Conductor.schedule({
@@ -196,7 +223,7 @@ await Conductor.schedule({
 
 - **Web** acquires `navigator.locks.request(key)` (exclusive). The browser frees the lock
   when the holding tab closes or navigates, so leadership hands off to a waiting instance
-  with **no heartbeat**. A non-leader’s occurrence emits `onTaskSkipped` with reason
+  with **no heartbeat**. A non-leader's occurrence emits `onTaskSkipped` with reason
   `DEFERRED_BY_LEADER`; when that instance later becomes leader it fires the deferred
   occurrence immediately (no full-interval wait).
 - **Native** runs a single app instance, so this is a no-op (always the holder).
@@ -207,7 +234,8 @@ instance is a non-leader is skipped and **not** replayed on handoff.
 
 ### Task handlers — JS *or* native
 
-A task’s work can run as a **JS handler** or an **app-provided native handler**:
+A task's work can run as a **JS handler** or an **app-provided native handler**. JS is the easy
+path; a native handler is the reliable path for work that must run while the app is terminated.
 
 ```ts
 // JS handler — register at MODULE (global) scope, not inside a component/effect, so it
@@ -253,6 +281,10 @@ execution limits — for long work, kick off your own bounded task and return pr
 
 ## API
 
+The default export is a ready-to-use singleton bound to the platform backend (native module on
+iOS/Android, Web engine on web). Advanced consumers can construct their own `ConductorClient` with
+a custom backend.
+
 ```ts
 import Conductor from 'expo-conductor';
 
@@ -276,43 +308,65 @@ Conductor.addListener('onTaskSkipped',  (p) => {})  // includes reason
 Conductor.addListener('onTaskError',    (p) => {})
 ```
 
-## Testing
+## Optional first-party integrations
 
-| Suite | Command | Runs where |
-| --- | --- | --- |
-| TS engine + orchestration + API (Jest) | `pnpm --filter expo-conductor test` | anywhere with Node |
-| Kotlin engine (JUnit, shared fixtures) | `pnpm test:kotlin` | JDK 17+ (CI uses 21) |
-| Swift engine (XCTest, shared fixtures) | `pnpm test:swift` | macOS / Swift toolchain |
+The core is self-contained. These two opt-in bridges (each behind an optional peer dependency the
+core never imports) cover the two places where a dedicated Expo library does the job better.
 
-The Kotlin and Swift engine tests use standalone JVM-Gradle and SwiftPM harnesses, so
-they run **without** an Android emulator or Xcode project — they compile only the pure
-engine and run the shared fixtures through it. CI ([`.github/workflows/ci.yml`](./.github/workflows/ci.yml))
-runs all three.
+### Headless JS via `expo-task-manager` / `expo-background-task`
 
-### Manual testing with the demo app
+By default a **JS** handler only runs while the app is alive (its registry is in-memory).
+To let JS handlers run after the app is **terminated**, opt into the first-party background
+task — `expo-task-manager`'s `defineTask` uses a persisted, global registry the OS can
+invoke headlessly, and conductor drives its engine from that tick:
 
 ```sh
-pnpm install
-pnpm --filter expo-conductor build
-pnpm --filter demo prebuild           # generate native projects
-pnpm --filter demo android            # or: ios / web
+npx expo install expo-task-manager expo-background-task
 ```
 
-The demo has one section per feature with an in-app event log. To exercise OS-level
-background behavior on a device:
+```ts
+// app entry — MODULE scope (not inside a component)
+import Conductor, { TaskResult } from 'expo-conductor';
+import { registerConductorBackgroundTask } from 'expo-conductor/task-manager';
 
-- **Android background task:** `adb shell cmd jobscheduler run -f <your.package.name> <jobId>`
-  or force WorkManager via `adb shell am broadcast`. Inspect with
-  `adb shell dumpsys jobscheduler`.
-- **Android exact alarm:** schedule “Exact alarm in 10s”, lock the device, observe it fire.
-  Inspect with `adb shell dumpsys alarm`.
-- **iOS background refresh:** run from Xcode, pause in the debugger and call
-  `e -l objc -- (void)[[BGTaskScheduler sharedScheduler] _simulateLaunchForTaskWithIdentifier:@"com.expoconductor.refresh"]`.
-- **Notifications:** schedule “Notification in 5s”, background the app, observe delivery.
-- **Push (FCM):** enable FCM in the plugin, send a **raw FCM v1 data-only** message (see
-  the Push message format section below — not via the Expo Push Service, which re-wraps data).
+Conductor.defineTask('refresh', async () => TaskResult.SUCCESS);
+await registerConductorBackgroundTask({ minimumInterval: 15 }); // minutes (Android floor: 15)
+```
 
-See [`fixtures/README.md`](./fixtures/README.md) for the shared behavior contract.
+When this tick fires, conductor runs every currently-due task through its engine
+(`Conductor.runDueTasks()`), so priority/weight/policy still apply. `expo-task-manager` /
+`expo-background-task` are **optional peer dependencies** — the core works without them, and
+the hand-rolled native BGTaskScheduler/WorkManager path remains the default. Both are
+verified on a device build (iOS BGTask doesn't run on the Simulator); use
+`expo-background-task`'s `triggerTaskWorkerForTestingAsync()` in development to fire the tick
+on demand.
+
+### Notifications via `expo-notifications`
+
+`expo-notifications` owns the notification concerns conductor can't do well alone — real
+permission prompts (incl. Android 13+ from an Activity), notification channels, foreground
+presentation, and **cold-start response handling** (a tap that relaunches a terminated app):
+
+```sh
+npx expo install expo-notifications
+```
+
+```ts
+import { setupConductorNotifications } from 'expo-conductor/notifications';
+
+await setupConductorNotifications(); // foreground handler + Android channel + response routing
+```
+
+A notification whose `content.data.conductorTask` is a task id then runs that task (via
+`Conductor.runNow`) when delivered or tapped — including from a cold start, via
+`getLastNotificationResponseAsync`. `requestConductorNotificationPermissions()` performs the
+real prompt. `expo-notifications` is an **optional peer dependency**; conductor's own
+notification display (Android channel + `NotificationManagerCompat`, iOS
+`UNUserNotificationCenter`) remains the default when it isn't used.
+
+> Phase 3 is a draft: this wires permissions/channel/foreground/response-routing through
+> `expo-notifications`. Having it also *schedule* conductor's notifications (replacing the
+> native scheduling) and the on-device validation are a follow-up.
 
 ## Permissions
 
@@ -393,60 +447,59 @@ The `push` trigger only matches tasks that declare a `push` trigger with a match
 - **Web** runs time/recurrence/notification triggers while the page (or a service worker)
   is alive; true background execution depends on Periodic Background Sync availability.
 
-### Headless JS via `expo-task-manager` / `expo-background-task` (optional)
+## Testing
 
-By default a **JS** handler only runs while the app is alive (its registry is in-memory).
-To let JS handlers run after the app is **terminated**, opt into the first-party background
-task — `expo-task-manager`'s `defineTask` uses a persisted, global registry the OS can
-invoke headlessly, and conductor drives its engine from that tick:
+The engine is verified the same way on every platform — the *same* fixtures, three runners:
 
-```sh
-npx expo install expo-task-manager expo-background-task
-```
+| Suite | Command | Runs where |
+| --- | --- | --- |
+| TS engine + orchestration + API (Jest) | `pnpm --filter expo-conductor test` | anywhere with Node |
+| Kotlin engine (JUnit, shared fixtures) | `pnpm test:kotlin` | JDK 17+ (CI uses 21) |
+| Swift engine (XCTest, shared fixtures) | `pnpm test:swift` | macOS / Swift toolchain |
 
-```ts
-// app entry — MODULE scope (not inside a component)
-import Conductor, { TaskResult } from 'expo-conductor';
-import { registerConductorBackgroundTask } from 'expo-conductor/task-manager';
+The Kotlin and Swift engine tests use standalone JVM-Gradle and SwiftPM harnesses, so
+they run **without** an Android emulator or Xcode project — they compile only the pure
+engine and run the shared fixtures through it. CI ([`.github/workflows/ci.yml`](./.github/workflows/ci.yml))
+runs all three. See [`fixtures/README.md`](./fixtures/README.md) for the shared behavior contract.
 
-Conductor.defineTask('refresh', async () => TaskResult.SUCCESS);
-await registerConductorBackgroundTask({ minimumInterval: 15 }); // minutes (Android floor: 15)
-```
+### Manual testing with the demo app
 
-When this tick fires, conductor runs every currently-due task through its engine
-(`Conductor.runDueTasks()`), so priority/weight/policy still apply. `expo-task-manager` /
-`expo-background-task` are **optional peer dependencies** — the core works without them, and
-the hand-rolled native BGTaskScheduler/WorkManager path remains the default. Both are
-verified on a device build (iOS BGTask doesn't run on the Simulator); use
-`expo-background-task`'s `triggerTaskWorkerForTestingAsync()` in development to fire the tick
-on demand.
-
-### Notifications via `expo-notifications` (optional)
-
-`expo-notifications` owns the notification concerns conductor can't do well alone — real
-permission prompts (incl. Android 13+ from an Activity), notification channels, foreground
-presentation, and **cold-start response handling** (a tap that relaunches a terminated app):
+`apps/demo/` is an Expo app with one section per feature and an in-app event log:
 
 ```sh
-npx expo install expo-notifications
+pnpm install
+pnpm --filter expo-conductor build
+pnpm --filter demo prebuild           # generate native projects
+pnpm --filter demo android            # or: ios / web
 ```
 
-```ts
-import { setupConductorNotifications } from 'expo-conductor/notifications';
+To exercise OS-level background behavior on a device:
 
-await setupConductorNotifications(); // foreground handler + Android channel + response routing
+- **Android background task:** `adb shell cmd jobscheduler run -f <your.package.name> <jobId>`
+  or force WorkManager via `adb shell am broadcast`. Inspect with
+  `adb shell dumpsys jobscheduler`.
+- **Android exact alarm:** schedule “Exact alarm in 10s”, lock the device, observe it fire.
+  Inspect with `adb shell dumpsys alarm`.
+- **iOS background refresh:** run from Xcode, pause in the debugger and call
+  `e -l objc -- (void)[[BGTaskScheduler sharedScheduler] _simulateLaunchForTaskWithIdentifier:@"com.expoconductor.refresh"]`.
+- **Notifications:** schedule “Notification in 5s”, background the app, observe delivery.
+- **Push (FCM):** enable FCM in the plugin, send a **raw FCM v1 data-only** message (see
+  the Push message format section above — not via the Expo Push Service, which re-wraps data).
+
+## Project layout
+
+`expo-conductor` is developed in a pnpm monorepo:
+
 ```
-
-A notification whose `content.data.conductorTask` is a task id then runs that task (via
-`Conductor.runNow`) when delivered or tapped — including from a cold start, via
-`getLastNotificationResponseAsync`. `requestConductorNotificationPermissions()` performs the
-real prompt. `expo-notifications` is an **optional peer dependency**; conductor's own
-notification display (Android channel + `NotificationManagerCompat`, iOS
-`UNUserNotificationCenter`) remains the default when it isn't used.
-
-> Phase 3 is a draft: this wires permissions/channel/foreground/response-routing through
-> `expo-notifications`. Having it also *schedule* conductor's notifications (replacing the
-> native scheduling) and the on-device validation are a follow-up.
+expo-conductor/
+├── fixtures/                     # shared cross-platform behavior cases (source of truth)
+├── packages/expo-conductor/      # the Expo native module
+│   ├── src/                      # TS proxy, types, public API, Web engine + Jest tests
+│   ├── android/                  # Kotlin engine + module + triggers (+ JVM test harness)
+│   ├── ios/                      # Swift engine + module + triggers (+ SwiftPM/XCTest)
+│   └── plugin/                   # config plugin (permissions, manifest, BGTask ids, FCM)
+└── apps/demo/                    # Expo app demonstrating every feature
+```
 
 ## License
 
