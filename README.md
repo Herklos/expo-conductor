@@ -130,7 +130,7 @@ A task fires when **any** of its triggers fire. Supported trigger types:
 | Trigger | Android | iOS | Web | Notes |
 | --- | --- | --- | --- | --- |
 | `time` (at / inSeconds) | WorkManager | UNNotification | `setTimeout` | one-shot |
-| `recurrence` (interval/daily/weekly/cron) | Periodic WorkManager | BGTaskScheduler + notif | `setInterval` | repeating |
+| `recurrence` (interval/daily/weekly/cron) | Periodic WorkManager | BGTaskScheduler (silent) | `setInterval` | repeating |
 | `notification` | NotificationManagerCompat (auto channel) | UNUserNotificationCenter | timer only (no UI) | user-visible on iOS/Android |
 | `alarm` (exact) | AlarmManager (`setExactAndAllowWhileIdle`) | ⚠︎ notification fallback | `setTimeout` | exact wall-clock |
 | `background` (deferrable) | WorkManager | BGAppRefreshTask | Periodic Background Sync | OS-optimized |
@@ -429,6 +429,13 @@ The `push` trigger only matches tasks that declare a `push` trigger with a match
   banner there. On Android these run as silent WorkManager/alarm jobs. (Only the
   `notification` trigger is intended to be user-visible on both platforms — on Android it
   posts via a `NotificationManagerCompat` channel the module creates automatically.)
+- **iOS recurrence is silent:** a `recurrence`-only task (and `background` / `appState` /
+  `push`-only tasks) is **never** surfaced as a notification banner on iOS — it is woken
+  opportunistically via `BGTaskScheduler` and advanced by the foreground engine while the app
+  is alive. Only a `notification` / `time` / `alarm` trigger produces a banner. (Up to 0.2.0,
+  every scheduled task posted a banner — recurrence-only tasks included — which appeared as a
+  spurious "Task" notification. See the [changelog](packages/expo-conductor/CHANGELOG.md).) If
+  you want a recurring *visible* notification, add a `notification` trigger with a `title`.
 - **iOS background execution** is opportunistic (BGTaskScheduler decides timing); minimum
   intervals are advisory, and **background tasks do not run on the iOS Simulator** — test
   `background` triggers on a physical device. The BGTask launch handler and notification

@@ -242,7 +242,15 @@ public class ExpoConductorModule: Module {
     var updated = task
     updated["nextRunAt"] = next
     TaskStore().upsert(updated)
-    NotificationScheduler.schedule(id: id, fireAtMs: next, title: notif?["title"] as? String, body: notif?["body"] as? String)
+    // Re-arm the NEXT occurrence the same way the live `schedule` path does: a user-visible banner
+    // only for a notification/time/alarm trigger; otherwise (a native recurrence-only task) wake
+    // silently via BGTaskScheduler rather than posting a spurious "Task" banner. See NotificationPolicy.
+    let triggers = (task["triggers"] as? [[String: Any]]) ?? []
+    if let visible = NotificationPolicy.visibleNotificationTrigger(triggers) {
+      NotificationScheduler.schedule(id: id, fireAtMs: next, title: visible["title"] as? String, body: visible["body"] as? String)
+    } else {
+      BackgroundScheduler.scheduleRefresh(earliestMs: next)
+    }
   }
 
   private static func backgroundStatus() -> String {
@@ -266,14 +274,17 @@ public class ExpoConductorModule: Module {
     let nextRunAt = task["nextRunAt"] as? Int
     let recurrence = TaskMapper.parseRecurrence(task)
 
-    if let nextRunAt = nextRunAt {
-      // time / notification / alarm all map to a local notification on iOS.
-      let notif = (task["triggers"] as? [[String: Any]])?.first { ($0["type"] as? String) == "notification" }
+    // Post a user-visible local notification ONLY when a trigger warrants one (`notification` /
+    // `time` / `alarm`). A recurrence-only (or background/appState/push) task is woken SILENTLY via
+    // BGTaskScheduler below — it previously ALSO posted a banner titled "Task" here, which surfaced
+    // spurious notifications. See NotificationPolicy; mirrors Android (posts only for `notification`).
+    let triggers = (task["triggers"] as? [[String: Any]]) ?? []
+    if let nextRunAt = nextRunAt, let notif = NotificationPolicy.visibleNotificationTrigger(triggers) {
       NotificationScheduler.schedule(
         id: id,
         fireAtMs: nextRunAt,
-        title: notif?["title"] as? String,
-        body: notif?["body"] as? String
+        title: notif["title"] as? String,
+        body: notif["body"] as? String
       )
     }
     if recurrence != nil || hasBackgroundTrigger(task) {
