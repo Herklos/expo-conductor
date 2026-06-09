@@ -19,6 +19,9 @@ import expo.modules.conductor.triggers.ConductorAlarmReceiver
 import expo.modules.conductor.triggers.ConductorWorker
 import expo.modules.conductor.triggers.NotificationDisplay
 import expo.modules.conductor.triggers.TaskMapper
+import expo.modules.interfaces.permissions.Permissions
+import expo.modules.kotlin.Promise
+import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import org.json.JSONObject
@@ -144,16 +147,43 @@ class ExpoConductorModule : Module() {
       }
     }
 
-    AsyncFunction("requestPermissionsAsync") {
-      // POST_NOTIFICATIONS (API 33+) is a runtime permission that must be requested from an
-      // Activity; this module reports the current grant state. Apps should request it via
-      // their Activity (or expo-notifications). Below API 33 notifications are allowed.
+    AsyncFunction("requestPermissionsAsync") { promise: Promise ->
       if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-        true
-      } else {
-        context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
-          android.content.pm.PackageManager.PERMISSION_GRANTED
+        promise.resolve(true)
+        return@AsyncFunction
       }
+      val perms = appContext.permissions
+      if (perms == null) {
+        // Permissions module unavailable — fall back to current grant state.
+        promise.resolve(
+          context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        )
+        return@AsyncFunction
+      }
+      // Delegate to expo-modules-core so it handles the Activity request + result callback.
+      // The utility resolves with a status map; we extract the boolean for our API contract.
+      Permissions.askForPermissionsWithPermissionsManager(
+        perms,
+        object : Promise {
+          override fun resolve(value: Any?) {
+            @Suppress("UNCHECKED_CAST")
+            val granted = when (val v = value) {
+              is Boolean -> v
+              is Map<*, *> ->
+                v["granted"] == true ||
+                  v.values.any { inner -> (inner as? Map<*, *>)?.get("granted") == true }
+              else -> false
+            }
+            promise.resolve(granted)
+          }
+          override fun reject(code: String, message: String?, cause: Throwable?) =
+            promise.reject(code, message, cause)
+          override fun reject(exception: CodedException) =
+            promise.reject(exception)
+        },
+        android.Manifest.permission.POST_NOTIFICATIONS,
+      )
     }
 
     AsyncFunction("reportResultAsync") { id: String, result: String, error: String? ->

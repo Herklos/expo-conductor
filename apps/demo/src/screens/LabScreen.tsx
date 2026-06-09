@@ -189,8 +189,8 @@ export function LabScreen() {
             weight: cell.weight,
             policy: {
               constraints: {
-                requiresCharging: cell.requiresCharging || undefined,
-                network: cell.requiresNetwork ? 'any' : undefined,
+                ...(cell.requiresCharging ? { requiresCharging: true } : {}),
+                ...(cell.requiresNetwork ? { network: 'any' as const } : {}),
               },
             },
           });
