@@ -204,8 +204,18 @@ export interface ExecutionPolicy {
 // Handlers
 // ---------------------------------------------------------------------------
 
-/** Where a task's work runs: a JS callback or an app-provided native handler. */
-export type HandlerType = 'js' | 'native';
+/**
+ * Where a task's work runs.
+ * - `'js'`     — a JS callback registered with {@link ConductorClient.defineTask}.
+ * - `'native'` — an app-provided Kotlin/Swift handler registered with
+ *                `ExpoConductorModule.registerHandler(name, handler)`.
+ * - `'rust'`   — a Rust function registered via `conductor_register` in the Rust glue
+ *                crate (`conductor_ffi`). Requires the demo app to be built with
+ *                `enableRust: true` in the config plugin. Behaves like `'native'` on the
+ *                JS/TS side — no JS handler is registered; the handler runs native-side
+ *                and emits `onTaskComplete`/`onTaskError` directly.
+ */
+export type HandlerType = 'js' | 'native' | 'rust';
 
 export interface TaskHandlerRef {
   name: string;
@@ -342,3 +352,59 @@ export type ExpoConductorModuleEvents = {
  *                   Periodic Background Sync).
  */
 export type ConductorStatus = 'available' | 'restricted' | 'unsupported';
+
+// ---------------------------------------------------------------------------
+// Execution history
+// ---------------------------------------------------------------------------
+
+/** The kind of a raw lifecycle event persisted to the execution log. */
+export type TaskExecutionEventKind = 'execute' | 'complete' | 'error' | 'skipped';
+
+/**
+ * An immutable, serializable record of a single task lifecycle event. Stored in a
+ * native-side ring buffer (Android: SharedPreferences; iOS: UserDefaults; Web:
+ * localStorage) so background/headless executions survive app restarts and are visible
+ * when the app next runs. Fold a sequence of events into
+ * {@link TaskExecutionRecord}s with `foldHistory()`.
+ */
+export interface TaskExecutionEvent {
+  kind: TaskExecutionEventKind;
+  taskId: string;
+  /** UTC epoch ms when this event was recorded. */
+  triggeredAt: number;
+  /** Present for execute/complete/error events. */
+  triggerType?: TriggerType;
+  attempt?: number;
+  /** Present for complete events. */
+  result?: TaskResult;
+  /** Present for error events. */
+  error?: string;
+  /** Present for skipped events. */
+  reason?: PolicyReason | 'DEFERRED_BY_BUDGET' | 'DEFERRED_BY_LEADER';
+}
+
+/** Derived lifecycle status of an execution record. */
+export type TaskExecutionStatus = 'running' | 'completed' | 'failed' | 'error' | 'skipped';
+
+/**
+ * A derived record produced by folding execute→complete/error/skipped event pairs from
+ * {@link TaskExecutionEvent}s via `foldHistory()`.
+ *
+ * **Native pairing caveat**: native platforms always emit `attempt: 1` and set `firedAt`
+ * to the completion time, so execute→complete pairs are matched by taskId proximity
+ * rather than exact `firedAt`. Rapid repeated fires of one task id may mis-pair events.
+ * This is a documented heuristic — handlers should be idempotent.
+ */
+export interface TaskExecutionRecord {
+  taskId: string;
+  triggerType: TriggerType;
+  /** UTC epoch ms when the task was dispatched (execute event). */
+  firedAt: number;
+  attempt: number;
+  /** UTC epoch ms when the task completed/errored (complete/error event). */
+  completedAt?: number;
+  result?: TaskResult;
+  error?: string;
+  skippedReason?: PolicyReason | 'DEFERRED_BY_BUDGET' | 'DEFERRED_BY_LEADER';
+  status: TaskExecutionStatus;
+}

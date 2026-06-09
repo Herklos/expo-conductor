@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-09
+
+### Added
+
+- **`HandlerType: 'rust'`** — first-class Rust handler type alongside `'js'` and
+  `'native'`. A task declared `handler: { type: 'rust', name: 'my-handler' }` invokes
+  a Rust function registered via `conductor_register` in the `conductor_ffi` glue crate
+  over a hand-rolled C ABI (`conductor_dispatch` / `conductor_free_string` /
+  `conductor_app_init`). Behaves identically to `'native'` on the TS/client side.
+  Requires `enableRust: true` in the config plugin (default `false`). **Mobile linking
+  requires NDK/Xcode; logic verified via `pnpm test:rust` (`cargo test`).**
+
+- **`conductor_ffi` Rust crate** (`rust/`) — thread-safe name→handler registry
+  (`Arc<dyn Fn>`), panic-safe dispatch via `catch_unwind`, C ABI, and a C header.
+  6 host tests covering dispatch, missing handlers, panic handling, and UTF-8.
+
+- **Execution history** — append-only ring buffer (200 events) persists every task
+  lifecycle event to durable storage on all platforms:
+  Web: `localStorage`; Android: `SharedPreferences`; iOS: `UserDefaults`.
+  Written from the main-thread `emit()` helper so headless background runs are captured.
+  Access via `Conductor.getHistory()` / `Conductor.clearHistory()` and the new
+  `getHistoryAsync` / `clearHistoryAsync` AsyncFunctions on native modules.
+
+- **`foldHistory(events: TaskExecutionEvent[]): TaskExecutionRecord[]`** — exported from
+  `expo-conductor`. Folds raw events into paired execution records (execute→complete
+  FIFO matching; heuristic for native-platform pairing documented).
+
+- **Reconciliation algorithm** (`src/reconcile.ts`) — pure TS `reconcile(tasks, records,
+  { now })`. Computes expected firings from deterministic triggers and greedy-matches to
+  actual records → `{ matched, missed, unexpected, aborted }`. Exact for
+  `time`/`recurrence`/`alarm`; advisory for `background`/`push`/`appState`. Exported
+  from `expo-conductor` alongside `expectedOccurrences`, `DEFAULT_TOLERANCE_MS`,
+  `DEFAULT_WINDOW_MS`, and types.
+
+- **`enableRust` config-plugin option** — writes `expo.conductor.enableRust` to
+  `gradle.properties` (Android) and enables the `CONDUCTOR_RUST` xcconfig flag (iOS).
+
+- **Demo: cross-language task lab** — multi-screen demo with Lab (5×4
+  archetype×language matrix with per-cell toggles + priority/weight/constraint settings),
+  History (persistent execution records including headless runs), Reconciliation
+  (missed/aborted/unexpected visualization), and Lifecycle screens.
+
+### Changed
+
+- `HandlerType` is now `'js' | 'native' | 'rust'`. Backward compatible.
+- `ConductorWorker.kt` — treats `handlerType == "rust"` like `"native"` on the headless
+  path.
+- `ConductorBackend` interface gains `getHistoryAsync()` and `clearHistoryAsync()`.
+- `ConductorClient` gains `getHistory()` and `clearHistory()` convenience methods.
+- `build.gradle` — reads `expo.conductor.enableRust` gradle property.
+- `ExpoConductor.podspec` — reads `ENV['CONDUCTOR_RUST']` for xcconfig.
+- `plugin/src/index.ts` — `ConductorPluginOptions` gains `enableRust?: boolean`.
+
 ## [0.2.2] - 2026-06-09
 
 ### Fixed

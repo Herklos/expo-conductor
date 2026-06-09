@@ -8,6 +8,8 @@
     "test": "pnpm --filter expo-conductor test",
     "test:kotlin": "cd packages/expo-conductor/android/engine-jvm && gradle test --console=plain",
     "test:swift": "cd packages/expo-conductor/ios && swift test",
+    "test:rust": "cargo test --manifest-path packages/expo-conductor/rust/Cargo.toml",
+    "test:rust:demo": "cargo test --manifest-path apps/demo/rust/Cargo.toml",
     "typecheck": "pnpm -r --if-present typecheck",
     "demo": "pnpm --filter demo start",
     "publish:lib": "pnpm --filter expo-conductor publish:public"

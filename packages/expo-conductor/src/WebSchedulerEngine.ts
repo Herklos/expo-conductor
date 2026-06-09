@@ -18,6 +18,7 @@ import {
   type ResourceBudget,
   type ResourceWeight,
   type TaskDefinition,
+  type TaskExecutionEvent,
   TaskResult,
   type Trigger,
   type TriggerType,
@@ -27,6 +28,7 @@ import {
   type AppStateTransition,
   defaultAppStateSource,
 } from './web/engine/appState';
+import { ExecutionLog } from './web/engine/executionLog';
 import {
   defaultLeaderElection,
   type LeaderElection,
@@ -86,6 +88,7 @@ export class WebSchedulerEngine implements ConductorBackend {
     onTaskError: new Set(),
     onTaskSkipped: new Set(),
   };
+  private readonly executionLog: ExecutionLog;
 
   private readonly now: () => number;
   private readonly setTimer: (cb: () => void, ms: number) => unknown;
@@ -109,6 +112,7 @@ export class WebSchedulerEngine implements ConductorBackend {
     this.deviceContext = options.deviceContext ?? (() => DEFAULT_CONTEXT);
     this.deferRetryMs = options.deferRetryMs ?? 60_000;
     this.leaderElection = options.leaderElection ?? defaultLeaderElection();
+    this.executionLog = new ExecutionLog();
     // Re-arm timers (and re-claim single-flight leadership) for tasks restored from
     // persistence — otherwise web persistence is write-only (tasks survive reload but never
     // fire). A task whose nextRunAt is already past fires on the next tick (catch-up).
@@ -259,14 +263,79 @@ export class WebSchedulerEngine implements ConductorBackend {
     };
   }
 
+  async getHistoryAsync(): Promise<TaskExecutionEvent[]> {
+    return this.executionLog.all();
+  }
+
+  async clearHistoryAsync(): Promise<void> {
+    this.executionLog.clear();
+  }
+
   // --- internals -----------------------------------------------------------
 
   private emit<E extends keyof ExpoConductorModuleEvents>(
     event: E,
     payload: Parameters<ExpoConductorModuleEvents[E]>[0],
   ): void {
+    // Persist to the execution log before notifying listeners so history is available
+    // synchronously to any listener that calls getHistoryAsync.
+    this.appendToLog(event, payload);
     for (const listener of this.listeners[event]) {
       (listener as (p: typeof payload) => void)(payload);
+    }
+  }
+
+  private appendToLog<E extends keyof ExpoConductorModuleEvents>(
+    event: E,
+    payload: Parameters<ExpoConductorModuleEvents[E]>[0],
+  ): void {
+    const now = this.now();
+    switch (event) {
+      case 'onTaskExecute': {
+        const p = payload as Parameters<ExpoConductorModuleEvents['onTaskExecute']>[0];
+        this.executionLog.append({
+          kind: 'execute',
+          taskId: p.taskId,
+          triggeredAt: now,
+          triggerType: p.triggerType,
+          attempt: p.attempt,
+        });
+        break;
+      }
+      case 'onTaskComplete': {
+        const p = payload as Parameters<ExpoConductorModuleEvents['onTaskComplete']>[0];
+        this.executionLog.append({
+          kind: 'complete',
+          taskId: p.taskId,
+          triggeredAt: now,
+          triggerType: p.triggerType,
+          attempt: p.attempt,
+          result: p.result,
+        });
+        break;
+      }
+      case 'onTaskError': {
+        const p = payload as Parameters<ExpoConductorModuleEvents['onTaskError']>[0];
+        this.executionLog.append({
+          kind: 'error',
+          taskId: p.taskId,
+          triggeredAt: now,
+          triggerType: p.triggerType,
+          attempt: p.attempt,
+          error: p.error,
+        });
+        break;
+      }
+      case 'onTaskSkipped': {
+        const p = payload as Parameters<ExpoConductorModuleEvents['onTaskSkipped']>[0];
+        this.executionLog.append({
+          kind: 'skipped',
+          taskId: p.taskId,
+          triggeredAt: now,
+          reason: p.reason,
+        });
+        break;
+      }
     }
   }
 

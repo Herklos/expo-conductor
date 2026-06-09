@@ -8,10 +8,10 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.expoconductor.demo"
+      "bundleIdentifier": "software.drakkar.expoconductor.demo"
     },
     "android": {
-      "package": "com.expoconductor.demo"
+      "package": "software.drakkar.expoconductor.demo"
     },
     "plugins": [
       [
@@ -19,9 +19,12 @@
         {
           "enableFcm": false,
           "enableExactAlarms": true,
-          "backgroundTaskIdentifiers": ["com.expoconductor.refresh"]
+          "enableRust": true,
+          "rustLibName": "conductor_demo_ffi",
+          "backgroundTaskIdentifiers": ["software.drakkar.expoconductor.refresh"]
         }
-      ]
+      ],
+      "./conductor-rust.plugin"
     ]
   }
 }

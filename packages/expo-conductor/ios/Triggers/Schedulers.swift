@@ -34,7 +34,7 @@ enum NotificationScheduler {
 /// this) and `registerLaunchHandlers(_:)` must run during app launch (done by
 /// `ConductorAppDelegate`).
 enum BackgroundScheduler {
-  static let refreshIdentifier = "com.expoconductor.refresh"
+  static let refreshIdentifier = "software.drakkar.expoconductor.refresh"
   private static var registered = false
 
   /// Register the BGTask launch handler. Must be called before the app finishes

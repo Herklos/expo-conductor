@@ -1,0 +1,20 @@
+[package]
+name = "conductor_demo_ffi"
+version = "0.1.0"
+edition = "2021"
+description = "Demo Rust handlers for expo-conductor — 5 task archetypes for the cross-language lab."
+
+# cdylib  → Android JNI (.so via cargo-ndk)
+# staticlib → iOS xcframework (cargo lipo / cargo-xcode)
+# rlib     → enables `cargo test` on the host without a mobile target
+[lib]
+crate-type = ["rlib", "cdylib", "staticlib"]
+name = "conductor_demo_ffi"
+
+[dependencies]
+# Depend on the lib's rlib only (never the cdylib/staticlib) so this crate
+# provides ALL the exported C symbols without duplicating them.
+# `default-features = false` disables the `default-app-init` feature, meaning
+# conductor_ffi does NOT emit its own `conductor_app_init` symbol — this crate
+# provides that symbol instead (and registers the demo handlers inside it).
+conductor_ffi = { path = "../../../packages/expo-conductor/rust", default-features = false }

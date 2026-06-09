@@ -17,12 +17,29 @@ useExpoPublishing()
 // (AGP+KGP gotcha), so enableFcm only controls runtime bundling + manifest registration.
 def enableFcm = (findProperty('expo.conductor.enableFcm') ?: 'false').toString().toBoolean()
 
+// Whether the Rust FFI handler crate is compiled in (cargo-ndk → jniLibs). When true
+// the config plugin has already run cargo-ndk and placed the .so under jniLibs/.
+// RustTaskBridge.kt always compiles (System.loadLibrary is guarded by a try/catch) —
+// only jniLib presence controls whether the library loads.
+// Default false: zero impact on apps not using Rust handlers.
+def enableRust = (findProperty('expo.conductor.enableRust') ?: 'false').toString().toBoolean()
+
+// The Rust native library name (without `lib` prefix / `.so`). Injected into
+// BuildConfig so RustTaskBridge can call System.loadLibrary(BuildConfig.CONDUCTOR_RUST_LIB_NAME).
+// Default "conductor_ffi". Override with expo.conductor.rustLibName in gradle.properties.
+// The demo crate uses "conductor_demo_ffi"; a production crate would export "conductor_ffi".
+def rustLibName = (findProperty('expo.conductor.rustLibName') ?: 'conductor_ffi').toString()
+
 android {
   namespace "expo.modules.conductor"
+  buildFeatures {
+    buildConfig true
+  }
   defaultConfig {
     minSdkVersion 24
     compileSdkVersion safeExtGet("compileSdkVersion", 34)
     targetSdkVersion safeExtGet("targetSdkVersion", 34)
+    buildConfigField "String", "CONDUCTOR_RUST_LIB_NAME", '"' + rustLibName + '"'
   }
   compileOptions {
     sourceCompatibility JavaVersion.VERSION_17

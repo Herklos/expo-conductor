@@ -7,6 +7,7 @@ import type {
   RegisteredTask,
   ResourceBudget,
   TaskDefinition,
+  TaskExecutionEvent,
   TaskResult,
 } from './ExpoConductor.types';
 import { WebSchedulerEngine, type WebSchedulerOptions } from './WebSchedulerEngine';
@@ -83,6 +84,12 @@ class ExpoConductorWebModule
     listener: ExpoConductorModuleEvents[E],
   ): ConductorSubscription {
     return this.engine.addListener(event, listener);
+  }
+  getHistoryAsync(): Promise<TaskExecutionEvent[]> {
+    return this.engine.getHistoryAsync();
+  }
+  clearHistoryAsync(): Promise<void> {
+    return this.engine.clearHistoryAsync();
   }
 }
 

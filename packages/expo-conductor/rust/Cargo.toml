@@ -1,0 +1,25 @@
+[package]
+name = "conductor_ffi"
+version = "0.1.0"
+edition = "2021"
+description = "Rust FFI glue crate for expo-conductor — registers and dispatches Rust task handlers over a minimal C ABI."
+license = "MIT"
+
+# rlib: enables `cargo test` on the host (logic tests, C ABI round-trip).
+# cdylib: Android JNI (.so via cargo-ndk).
+# staticlib: iOS xcframework (cargo lipo / cargo-xcode).
+[lib]
+crate-type = ["rlib", "cdylib", "staticlib"]
+name = "conductor_ffi"
+
+[features]
+# Emit the default no-op `conductor_app_init` C symbol.
+# Disable this when a *consuming* crate (e.g. apps/demo/rust) provides its own
+# `conductor_app_init` that registers app-specific handlers — avoids a duplicate-symbol
+# linker error when both crates end up in the same cdylib / staticlib.
+default = ["default-app-init"]
+default-app-init = []
+
+[dependencies]
+# No external dependencies: the crate only uses the Rust standard library.
+# Add serde_json here if you want structured deserialization of the data JSON.

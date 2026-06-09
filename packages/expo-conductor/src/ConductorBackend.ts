@@ -9,6 +9,7 @@ import type {
   RegisteredTask,
   ResourceBudget,
   TaskDefinition,
+  TaskExecutionEvent,
   TaskResult,
 } from './ExpoConductor.types';
 
@@ -47,4 +48,12 @@ export interface ConductorBackend {
     event: E,
     listener: ExpoConductorModuleEvents[E],
   ): ConductorSubscription;
+  /**
+   * Return all persisted execution events from the ring buffer. Events are in
+   * append order (oldest first). Fold them into {@link TaskExecutionRecord}s with
+   * `foldHistory()` from `expo-conductor`.
+   */
+  getHistoryAsync(): Promise<TaskExecutionEvent[]>;
+  /** Clear the execution-event ring buffer. */
+  clearHistoryAsync(): Promise<void>;
 }

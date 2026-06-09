@@ -1,6 +1,6 @@
 {
   "name": "@drakkar.software/expo-conductor",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Define tasks in an Expo app with rich execution policies (time, notifications, FCM/push, alarms, background) — priority, resource weight, recurrence and constraints. Native-first engine on Android (Kotlin) and iOS (Swift) with a Web implementation.",
   "main": "build/index.js",
   "types": "build/index.d.ts",
@@ -25,6 +25,7 @@
     "build:plugin": "tsc -p plugin/tsconfig.json",
     "clean": "rm -rf build plugin/build",
     "test": "jest",
+    "test:rust": "cargo test --manifest-path rust/Cargo.toml",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p plugin/tsconfig.json --noEmit",
     "prepublishOnly": "pnpm run clean && pnpm run typecheck && pnpm run test && pnpm run build",
     "publish:public": "pnpm publish --access public"
@@ -60,8 +61,13 @@
     "ios/ExpoConductorModule.swift",
     "ios/ConductorAppDelegate.swift",
     "ios/ConductorTaskHandler.swift",
+    "ios/ConductorRustBridge.swift",
+    "ios/conductor_ffi.h",
     "ios/Engine",
     "ios/Triggers",
+    "rust/Cargo.toml",
+    "rust/src",
+    "rust/include",
     "plugin/build",
     "expo-module.config.json",
     "app.plugin.js"

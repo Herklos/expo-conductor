@@ -12,6 +12,19 @@ import NativeBackend from './ExpoConductorModule';
 export * from './ExpoConductor.types';
 export { ConductorClient } from './Conductor';
 export type { ConductorBackend, ConductorSubscription } from './ConductorBackend';
+export { foldHistory } from './history/history';
+export {
+  reconcile,
+  expectedOccurrences,
+  DEFAULT_TOLERANCE_MS,
+  DEFAULT_WINDOW_MS,
+} from './reconcile';
+export type {
+  ExpectedOccurrence,
+  MatchedOccurrence,
+  ReconcileResult,
+  ReconcileOptions,
+} from './reconcile';
 
 /** The platform backend (native module or web engine). */
 export const backend: ConductorBackend = NativeBackend;

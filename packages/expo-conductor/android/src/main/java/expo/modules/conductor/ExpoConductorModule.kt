@@ -13,6 +13,7 @@ import androidx.work.WorkManager
 import expo.modules.conductor.engine.PolicyEngine
 import expo.modules.conductor.engine.ResourceWeight
 import expo.modules.conductor.engine.WeightEngine
+import expo.modules.conductor.storage.ExecutionLogStore
 import expo.modules.conductor.storage.TaskStore
 import expo.modules.conductor.triggers.ConductorAlarmReceiver
 import expo.modules.conductor.triggers.ConductorWorker
@@ -34,11 +35,39 @@ class ExpoConductorModule : Module() {
     get() = appContext.reactContext ?: throw IllegalStateException("No React context")
 
   private val store: TaskStore by lazy { TaskStore(context) }
+  private val execLog: ExecutionLogStore by lazy { ExecutionLogStore(context) }
   private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
-  /** Emit a JS event on the main thread (triggers run on WorkManager/alarm threads). */
+  /** Emit a JS event on the main thread and write to the execution log for history.
+   *  Triggers run on WorkManager/alarm threads — always post to main for JS safety. */
   private fun emit(name: String, payload: Map<String, Any?>) {
+    execLog.append(buildLogEvent(name, payload))
     mainHandler.post { sendEvent(name, payload) }
+  }
+
+  /**
+   * Convert a lifecycle event name + payload into the serializable
+   * [TaskExecutionEvent] shape that the TS `foldHistory()` understands.
+   */
+  private fun buildLogEvent(name: String, payload: Map<String, Any?>): Map<String, Any?> {
+    val kind = when (name) {
+      "onTaskExecute" -> "execute"
+      "onTaskComplete" -> "complete"
+      "onTaskError" -> "error"
+      "onTaskSkipped" -> "skipped"
+      else -> name
+    }
+    val event = mutableMapOf<String, Any?>(
+      "kind" to kind,
+      "taskId" to (payload["taskId"] as? String ?: ""),
+      "triggeredAt" to System.currentTimeMillis(),
+    )
+    payload["triggerType"]?.let { event["triggerType"] = it }
+    payload["attempt"]?.let { event["attempt"] = it }
+    payload["result"]?.let { event["result"] = it }
+    payload["error"]?.let { event["error"] = it }
+    payload["reason"]?.let { event["reason"] = it }
+    return event
   }
 
   override fun definition() = ModuleDefinition {
@@ -141,6 +170,14 @@ class ExpoConductorModule : Module() {
         ))
       }
       emitComplete(id, result)
+    }
+
+    AsyncFunction("getHistoryAsync") {
+      execLog.all()
+    }
+
+    AsyncFunction("clearHistoryAsync") {
+      execLog.clear()
     }
   }
 
@@ -290,6 +327,22 @@ class ExpoConductorModule : Module() {
       emitComplete(id, result)
     }
 
+    // Rust handlers run via FFI through RustTaskBridge (requires enableRust=true at build time).
+    if (handlerType == "rust") {
+      val dataJson = try { org.json.JSONObject(data as? Map<*, *> ?: emptyMap<String, Any?>()).toString() } catch (_: Exception) { "{}" }
+      val result = try {
+        RustTaskBridge.dispatch(handlerName, id, dataJson)
+      } catch (e: Throwable) {
+        emit("onTaskError", mapOf(
+          "taskId" to id, "error" to (e.message ?: e.toString()),
+          "firedAt" to System.currentTimeMillis(), "attempt" to 1, "triggerType" to "background",
+        ))
+        "failed"
+      }
+      running.remove(id)
+      emitComplete(id, result)
+    }
+
     // A manual run-now must not advance the task's real schedule (matches the TS engine).
     if (!manual) reschedule(task)
     return true
@@ -376,7 +429,9 @@ class ExpoConductorModule : Module() {
 
       val id = task.optString("id")
       val handler = task.optJSONObject("handler")
-      val isNative = handler?.optString("type") == "native"
+      val handlerType = handler?.optString("type") ?: "js"
+      val isNative = handlerType == "native"
+      val isRust = handlerType == "rust"
 
       // A notification trigger delivers its notification regardless of handler type.
       val notif = TaskMapper.notificationTrigger(task)
@@ -386,11 +441,16 @@ class ExpoConductorModule : Module() {
         NotificationDisplay.show(context, id, title, body)
       }
       if (isNative) nativeHandlers[handler!!.optString("name")]?.run(id, data)
+      if (isRust) {
+        val name = handler?.optString("name") ?: id
+        val dataJson = try { org.json.JSONObject(data).toString() } catch (_: Exception) { "{}" }
+        RustTaskBridge.dispatch(name, id, dataJson)
+      }
 
       // Advance/re-arm only if the occurrence was meaningfully handled here. A pure JS
       // handler with no notification did nothing, so leave nextRunAt to replay on the
       // next foreground launch instead of silently losing the occurrence.
-      if (!isNative && notif == null) return
+      if (!isNative && !isRust && notif == null) return
       // min(next recurrence, future one-shots), matching the live reschedule + Web; null -> nothing
       // future, so don't re-arm (a fired one-shot is done).
       val recurrence = TaskMapper.recurrence(task)

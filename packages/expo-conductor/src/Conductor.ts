@@ -16,6 +16,7 @@ import {
   type ResourceBudget,
   type TaskDefinition,
   type TaskExecutionContext,
+  type TaskExecutionEvent,
   TaskResult,
 } from './ExpoConductor.types';
 import { assertValidRecurrence, recurrenceFor } from './web/normalize';
@@ -86,6 +87,7 @@ export class ConductorClient {
   /**
    * Warn when a task with a JS handler that can fire while the app is terminated has no
    * handler registered — a strong signal the handler was defined in component scope.
+   * Native and Rust handlers run on the native side and never need a JS registration.
    */
   private warnIfHandlerMissing(definition: TaskDefinition): void {
     const type = definition.handler?.type ?? 'js';
@@ -157,6 +159,20 @@ export class ConductorClient {
     return this.backend.addListener(event, listener);
   }
 
+  /**
+   * Return all persisted execution events from the ring buffer (oldest first).
+   * Fold them into {@link TaskExecutionRecord}s with `foldHistory()` from
+   * `expo-conductor`.
+   */
+  getHistory(): Promise<TaskExecutionEvent[]> {
+    return this.backend.getHistoryAsync();
+  }
+
+  /** Clear the execution-event ring buffer. */
+  clearHistory(): Promise<void> {
+    return this.backend.clearHistoryAsync();
+  }
+
   private ensureDispatch(): void {
     if (this.executeSub) return;
     this.executeSub = this.backend.addListener('onTaskExecute', (payload) => {
@@ -175,7 +191,7 @@ export class ConductorClient {
     // share one handler, e.g. dynamic ids). Falls back to the task id itself.
     const handlerName = this.taskHandlerNames.get(payload.taskId) ?? payload.taskId;
     const handler = this.handlers.get(handlerName);
-    if (!handler) return; // native handler or no JS handler registered
+    if (!handler) return; // native/rust handler, or no JS handler registered
     const ctx: TaskExecutionContext = {
       taskId: payload.taskId,
       triggerType: payload.triggerType,

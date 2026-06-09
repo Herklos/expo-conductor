@@ -20,9 +20,10 @@ class ConductorWorker(context: Context, params: WorkerParameters) : Worker(conte
     val task = store.get(id) ?: return Result.success()
     val module = ExpoConductorModule.INSTANCE
     if (module == null) {
-      // No JS runtime. Native handlers can still run headless; JS handlers are deferred
+      // No JS runtime. Native + Rust handlers can run headless; JS handlers are deferred
       // (retry) so they execute once a JS runtime exists.
-      return if (task.optJSONObject("handler")?.optString("type") == "native") {
+      val handlerType = task.optJSONObject("handler")?.optString("type")
+      return if (handlerType == "native" || handlerType == "rust") {
         ExpoConductorModule.dispatchHeadless(applicationContext, task, emptyMap())
         Result.success()
       } else {

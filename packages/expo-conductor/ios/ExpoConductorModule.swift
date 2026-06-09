@@ -12,6 +12,7 @@ import UIKit
 public class ExpoConductorModule: Module {
   static weak var shared: ExpoConductorModule?
   private let store = TaskStore()
+  private let execLog = ExecutionLog()
   // `paused` and `budget` are written from AsyncFunction closures (the module queue) but read
   // from dispatch()/schedule() on notification/BGTask background threads, so guard them with a
   // lock like `running` (a torn read of the 4-Double `budget` struct or a stale `paused` could
@@ -145,10 +146,20 @@ public class ExpoConductorModule: Module {
         "taskId": id, "result": result, "firedAt": self.nowMs(), "attempt": 1, "triggerType": "background",
       ])
     }
+
+    AsyncFunction("getHistoryAsync") { [weak self] () -> [[String: Any]] in
+      self?.execLog.all() ?? []
+    }
+
+    AsyncFunction("clearHistoryAsync") { [weak self] in
+      self?.execLog.clear()
+    }
   }
 
-  /// Emit a JS event on the main thread (triggers run on notification/BGTask threads).
+  /// Emit a JS event on the main thread and write to the execution log for history.
+  /// Triggers run on notification/BGTask threads — always dispatch to main for JS safety.
   private func emit(_ name: String, _ payload: [String: Any]) {
+    execLog.append(ExecutionLog.buildEvent(name: name, payload: payload))
     DispatchQueue.main.async { [weak self] in self?.sendEvent(name, payload) }
   }
 
@@ -217,24 +228,28 @@ public class ExpoConductorModule: Module {
     guard PolicyEngine.evaluate(TaskMapper.constraints(task), DeviceInfo.read(now: now)).eligible else { return }
 
     let handler = task["handler"] as? [String: Any]
-    let isNative = (handler?["type"] as? String) == "native"
+    let handlerType = handler?["type"] as? String ?? "js"
+    let isNative = handlerType == "native"
+    let isRust = handlerType == "rust"
     let notif = (task["triggers"] as? [[String: Any]])?.first { ($0["type"] as? String) == "notification" }
 
-    // A native handler runs headless; a JS handler cannot (no JS runtime).
+    // Native and Rust handlers run headless; a JS handler cannot (no JS runtime).
     if isNative {
       let name = handler?["name"] as? String ?? id
       _ = ConductorHandlerRegistry.shared.handler(for: name)?(id, data)
     }
+    if isRust {
+      let name = handler?["name"] as? String ?? id
+      let dataJson = (try? JSONSerialization.data(withJSONObject: data)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+      _ = ConductorRustBridge.dispatch(name: name, taskId: id, dataJson: dataJson)
+    }
 
     // Re-arm the recurrence's NEXT occurrence when the occurrence was meaningfully handled here:
-    // a native handler ran, OR this is a notification task (the OS already delivered the current
-    // notification from its scheduled request, so we must schedule the next one or the chain
-    // dies). Previously this returned early for ANY non-native handler, so a recurring
-    // JS-handler + notification task silently stopped at cold start (Android re-arms it). A pure
-    // JS handler with no notification did nothing headless, so leave nextRunAt to replay on the
-    // next foreground launch. NOTE (vs Android, which app-posts notifications): iOS notifications
-    // are OS-delivered, so we re-arm the next one rather than re-post the current.
-    guard isNative || notif != nil else { return }
+    // a native/rust handler ran, OR this is a notification task (the OS already delivered the
+    // current notification from its scheduled request, so we must schedule the next one or the
+    // chain dies). A pure JS handler with no notification did nothing headless, so leave
+    // nextRunAt to replay on the next foreground launch.
+    guard isNative || isRust || notif != nil else { return }
     // min(next recurrence, future one-shots), matching the live reschedule + Web; nil -> nothing
     // future, so don't re-arm (a fired one-shot is done).
     let recurrence = TaskMapper.parseRecurrence(task)
@@ -360,6 +375,14 @@ public class ExpoConductorModule: Module {
     if handlerType == "native" {
       let result = ConductorHandlerRegistry.shared.handler(for: handlerName)?(id, data) ?? "noData"
       clearRunning(id) // completed synchronously
+      emit("onTaskComplete", ["taskId": id, "result": result, "firedAt": now, "attempt": 1, "triggerType": "background"])
+    }
+
+    // Rust handlers run via FFI through ConductorRustBridge (requires CONDUCTOR_RUST=1 at build).
+    if handlerType == "rust" {
+      let dataJson = (try? JSONSerialization.data(withJSONObject: data)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+      let result = ConductorRustBridge.dispatch(name: handlerName, taskId: id, dataJson: dataJson)
+      clearRunning(id)
       emit("onTaskComplete", ["taskId": id, "result": result, "firedAt": now, "attempt": 1, "triggerType": "background"])
     }
 

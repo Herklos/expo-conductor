@@ -22,6 +22,8 @@ apps/*/ios/
 Pods/
 # SwiftPM build output (from `swift test` / `pnpm test:swift`)
 **/.build/
+# Rust build artifacts
+**/target/
 
 # logs / os
 *.log
