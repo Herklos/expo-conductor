@@ -3,6 +3,13 @@
  * and the real-time event log (migrated from the original App.tsx).
  */
 import React, { useCallback, useState } from 'react';
+
+function fmtDateTime(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+    `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
 import {
   FlatList,
   Pressable,
@@ -158,10 +165,15 @@ export function LifecycleScreen() {
             <Text style={[styles.empty, { color: theme.muted }]}>None yet.</Text>
           ) : (
             tasks.map((t) => (
-              <Text key={t.id} style={[styles.taskLine, { color: theme.muted }]}>
-                • {t.id} — p{t.priority} — next{' '}
-                {t.nextRunAt ? new Date(t.nextRunAt).toLocaleTimeString() : '—'}
-              </Text>
+              <View key={t.id} style={styles.taskEntry}>
+                <Text style={[styles.taskLine, { color: theme.text }]}>• {t.id} — p{t.priority}</Text>
+                <Text style={[styles.taskMeta, { color: theme.muted }]}>
+                  since {fmtDateTime(t.createdAt)}
+                </Text>
+                <Text style={[styles.taskMeta, { color: theme.muted }]}>
+                  next  {t.nextRunAt ? fmtDateTime(t.nextRunAt) : '—'}
+                </Text>
+              </View>
             ))
           )}
         </Card>
@@ -224,7 +236,9 @@ const styles = StyleSheet.create({
   tasksCard: { marginBottom: 10 },
   sectionTitle: { fontSize: 14, fontWeight: '600', marginBottom: 8 },
   empty: { fontSize: 13 },
-  taskLine: { fontSize: 12, fontFamily: 'monospace', marginVertical: 1 },
+  taskEntry: { marginVertical: 3 },
+  taskLine: { fontSize: 12, fontFamily: 'monospace' },
+  taskMeta: { fontSize: 11, fontFamily: 'monospace', paddingLeft: 10 },
   buttonRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   btn: { paddingVertical: 9, paddingHorizontal: 14, borderRadius: 10 },
   btnText: { color: '#fff', fontWeight: '600', fontSize: 12 },

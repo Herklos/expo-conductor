@@ -16,6 +16,13 @@ import Conductor, {
   type TaskExecutionRecord,
 } from 'expo-conductor';
 
+function fmtDateTime(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number, w = 2) => String(n).padStart(w, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+    `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 interface ConductorContextValue {
   tasks: RegisteredTask[];
   records: TaskExecutionRecord[];
@@ -41,7 +48,7 @@ export function ConductorProvider({ children }: { children: React.ReactNode }) {
   const logRef = useRef<string[]>([]);
 
   const appendLog = useCallback((line: string) => {
-    const time = new Date().toLocaleTimeString();
+    const time = fmtDateTime(Date.now());
     const entry = `${time}  ${line}`;
     logRef.current = [entry, ...logRef.current].slice(0, 100);
     setLiveLog([...logRef.current]);

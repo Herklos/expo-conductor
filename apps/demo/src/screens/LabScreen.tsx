@@ -168,45 +168,53 @@ export function LabScreen() {
   const scheduleActive = useCallback(async () => {
     setStatus('Scheduling…');
     let scheduled = 0;
-    for (const archetype of ARCHETYPES) {
-      for (const lang of LANGS) {
-        if (!lang.available) continue;
-        const key = `${archetype.id}-${lang.id}`;
-        const cell = cells[key];
-        if (!cell?.active) continue;
+    try {
+      for (const archetype of ARCHETYPES) {
+        for (const lang of LANGS) {
+          if (!lang.available) continue;
+          const key = `${archetype.id}-${lang.id}`;
+          const cell = cells[key];
+          if (!cell?.active) continue;
 
-        const { taskId, handlerName, handlerType } = resolveTask(archetype, lang);
+          const { taskId, handlerName, handlerType } = resolveTask(archetype, lang);
 
-        // Cancel existing instance first (ignore errors — task may not exist).
-        try { await Conductor.cancelTask(taskId); } catch { /* ok */ }
+          // Cancel existing instance first (ignore errors — task may not exist).
+          try { await Conductor.cancelTask(taskId); } catch { /* ok */ }
 
-        await Conductor.schedule({
-          id: taskId,
-          handler: { name: handlerName, type: handlerType },
-          triggers: [{ type: 'recurrence', recurrence: { kind: 'interval', everyMs: 30_000 } }],
-          priority: cell.priority,
-          weight: cell.weight,
-          policy: {
-            constraints: {
-              requiresCharging: cell.requiresCharging || undefined,
-              network: cell.requiresNetwork ? 'any' : undefined,
+          await Conductor.schedule({
+            id: taskId,
+            handler: { name: handlerName, type: handlerType },
+            triggers: [{ type: 'recurrence', recurrence: { kind: 'interval', everyMs: 30_000 } }],
+            priority: cell.priority,
+            weight: cell.weight,
+            policy: {
+              constraints: {
+                requiresCharging: cell.requiresCharging || undefined,
+                network: cell.requiresNetwork ? 'any' : undefined,
+              },
             },
-          },
-        });
-        scheduled++;
+          });
+          scheduled++;
+        }
       }
+      await refresh();
+      setStatus(`✅ Scheduled ${scheduled} task${scheduled !== 1 ? 's' : ''}`);
+    } catch (e) {
+      setStatus('⚠ ' + (e instanceof Error ? e.message : 'Schedule failed'));
     }
-    await refresh();
-    setStatus(`✅ Scheduled ${scheduled} task${scheduled !== 1 ? 's' : ''}`);
   }, [cells, LANGS, refresh]);
 
   const cancelLab = useCallback(async () => {
     setStatus('Cancelling…');
-    const all = await Conductor.getTasks();
-    const lab = all.filter((t) => t.id.startsWith('lab-'));
-    await Promise.all(lab.map((t) => Conductor.cancelTask(t.id)));
-    await refresh();
-    setStatus(`🗑 Cancelled ${lab.length} lab task${lab.length !== 1 ? 's' : ''}`);
+    try {
+      const all = await Conductor.getTasks();
+      const lab = all.filter((t) => t.id.startsWith('lab-'));
+      await Promise.all(lab.map((t) => Conductor.cancelTask(t.id)));
+      await refresh();
+      setStatus(`🗑 Cancelled ${lab.length} lab task${lab.length !== 1 ? 's' : ''}`);
+    } catch (e) {
+      setStatus('⚠ ' + (e instanceof Error ? e.message : 'Cancel failed'));
+    }
   }, [refresh]);
 
   // ---------------------------------------------------------------------------
