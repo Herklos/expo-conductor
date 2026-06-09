@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-06-09
+
+### Fixed
+
+- **Android:** `ConductorMessagingService.kt` now always compiles correctly regardless of the
+  `enableFcm` setting. The previous `sourceSets.main.java.exclude` guard was silently ignored by the
+  Kotlin Gradle Plugin (AGP+KGP gotcha — `java.exclude` only filters the Java compile task, not
+  `kotlinc`), so with `enableFcm=false` the file was still fed to the Kotlin compiler without
+  `firebase-messaging` on the classpath, causing a compile error in consuming apps. Fixed by adding
+  `compileOnly "com.google.firebase:firebase-messaging:24.0.0"` so the service class always compiles
+  clean; the `implementation` dependency (and manifest `<service>` registration) remains gated on
+  `enableFcm`, so the JAR is only bundled at runtime when FCM is actually enabled. The now-dead
+  `sourceSets` exclude block is removed. Consuming apps no longer need to patch `build.gradle`.
+
 ## [0.2.1] - 2026-06-08
 
 ### Fixed

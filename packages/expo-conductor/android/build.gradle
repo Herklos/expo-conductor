@@ -10,8 +10,11 @@ applyKotlinExpoModulesCorePlugin()
 useCoreDependencies()
 useExpoPublishing()
 
-// Whether to compile the optional Firebase Cloud Messaging trigger. Toggled by the
-// config plugin via gradle property `expo.conductor.enableFcm`.
+// Whether to bundle the optional Firebase Cloud Messaging trigger at runtime and register
+// its manifest <service>. Toggled by the config plugin via gradle property
+// `expo.conductor.enableFcm`. Note: ConductorMessagingService.kt always compiles (see
+// compileOnly dependency below) — java.exclude does NOT filter the Kotlin compile task
+// (AGP+KGP gotcha), so enableFcm only controls runtime bundling + manifest registration.
 def enableFcm = (findProperty('expo.conductor.enableFcm') ?: 'false').toString().toBoolean()
 
 android {
@@ -28,19 +31,17 @@ android {
   kotlinOptions {
     jvmTarget = "17"
   }
-  sourceSets {
-    main {
-      if (!enableFcm) {
-        java.srcDirs += []
-        java.exclude '**/ConductorMessagingService.kt'
-      }
-    }
-  }
 }
 
 dependencies {
   implementation "androidx.work:work-runtime-ktx:2.9.1"
   implementation "androidx.core:core-ktx:1.13.1"
+  // compileOnly so ConductorMessagingService.kt always compiles — `java.exclude` in the
+  // sourceSets block does NOT filter the Kotlin compile task (AGP+KGP gotcha), so the
+  // file is fed to kotlinc even when FCM is disabled. With enableFcm=false the config
+  // plugin never adds the manifest <service>, so the inert class is never loaded. When
+  // enabled, the `implementation` line below bundles firebase-messaging at runtime too.
+  compileOnly "com.google.firebase:firebase-messaging:24.0.0"
   if (enableFcm) {
     implementation "com.google.firebase:firebase-messaging:24.0.0"
   }
