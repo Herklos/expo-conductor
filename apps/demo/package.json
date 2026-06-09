@@ -10,9 +10,9 @@
     "web": "expo start --web",
     "prebuild": "expo prebuild",
     "typecheck": "tsc --noEmit",
-    "update:dev": "eas update --channel development",
-    "update:preview": "eas update --channel preview",
-    "update:prod": "eas update --channel production"
+    "update:dev": "eas update --channel development --environment development",
+    "update:preview": "eas update --channel preview --environment preview",
+    "update:prod": "eas update --channel production --environment production"
   },
   "dependencies": {
     "expo": "~56.0.9",
