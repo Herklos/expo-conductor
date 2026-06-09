@@ -215,7 +215,7 @@ export function LabScreen() {
         }
       }
       await refresh();
-      setStatus(`✅ Scheduled ${scheduled} task${scheduled !== 1 ? 's' : ''} [${triggerMode}]`);
+      setStatus(`✅ Scheduled ${scheduled} task${scheduled !== 1 ? 's' : ''} · ${triggerMode}`);
     } catch (e) {
       setStatus('⚠ ' + (e instanceof Error ? e.message : 'Schedule failed'));
     }
