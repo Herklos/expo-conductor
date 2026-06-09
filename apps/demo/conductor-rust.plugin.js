@@ -44,6 +44,8 @@ const {
   withDangerousMod,
   withMainApplication,
   withAppDelegate,
+  withXcodeProject,
+  IOSConfig,
   createRunOncePlugin,
 } = require('expo/config-plugins');
 const path = require('path');
@@ -123,7 +125,30 @@ const withDemoHandlersIos = (config) => {
     },
   ]);
 
-  // 2. Inject DemoHandlers.register() into the AppDelegate.
+  // 2. Add DemoHandlers.swift to the Xcode project (PBXFileReference + Sources build phase).
+  config = withXcodeProject(config, (cfg) => {
+    const project = cfg.modResults;
+    const fileName = 'DemoHandlers.swift';
+    const appName = cfg.modRequest.projectName;
+
+    // Only add once.
+    const existing = project.pbxFileReferenceSection();
+    const alreadyAdded = Object.values(existing).some(
+      (ref) => ref && ref.path === `"${fileName}"`,
+    );
+    if (!alreadyAdded) {
+      IOSConfig.XcodeUtils.addBuildSourceFileToGroup({
+        filepath: fileName,
+        groupName: appName,
+        project,
+        targetUuid: project.getFirstTarget().uuid,
+      });
+    }
+
+    return cfg;
+  });
+
+  // 3. Inject DemoHandlers.register() into the AppDelegate.
   config = withAppDelegate(config, (cfg) => {
     let contents = cfg.modResults.contents;
 

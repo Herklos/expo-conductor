@@ -1,5 +1,5 @@
 import Foundation
-import ExpoConductor
+internal import ExpoConductor
 
 /**
  * Registers demo Swift task handlers for the cross-language lab.

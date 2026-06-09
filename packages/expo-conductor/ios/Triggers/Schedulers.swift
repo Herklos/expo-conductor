@@ -119,7 +119,7 @@ enum BackgroundScheduler {
   static func submitContinued() {
     #if canImport(BackgroundTasks)
     if #available(iOS 26, *) {
-      let request = BGContinuedProcessingTaskRequest(identifier: continuedIdentifier)
+      let request = BGContinuedProcessingTaskRequest(identifier: continuedIdentifier, title: "Continued Processing", subtitle: "")
       do {
         try BGTaskScheduler.shared.submit(request)
       } catch {
