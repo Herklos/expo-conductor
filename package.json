@@ -13,6 +13,9 @@
     "test:rust:demo": "cargo test --manifest-path apps/demo/rust/Cargo.toml",
     "typecheck": "pnpm -r --if-present typecheck",
     "demo": "pnpm --filter demo start",
+    "update:dev": "pnpm --filter demo update:dev",
+    "update:preview": "pnpm --filter demo update:preview",
+    "update:prod": "pnpm --filter demo update:prod",
     "publish:lib": "pnpm --filter expo-conductor publish:public"
   },
   "devDependencies": {
