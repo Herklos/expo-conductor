@@ -5,7 +5,6 @@
  */
 import React, { useState } from 'react';
 import {
-  FlatList,
   Platform,
   Pressable,
   StyleSheet,
@@ -13,6 +12,8 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LegendList } from '@legendapp/list/react-native';
 import type { TaskExecutionRecord } from 'expo-conductor';
 import { useTheme, type Theme } from '../theme';
 import { useConductor } from '../state/ConductorProvider';
@@ -81,9 +82,8 @@ function HistoryTab({ theme }: { theme: Theme }) {
 
   const sorted = [...filtered].sort((a, b) => b.firedAt - a.firedAt);
 
-  return (
-    <View style={{ flex: 1 }}>
-      {/* Filter + actions */}
+  const toolbar = (
+    <>
       <View style={[ht.toolbar, { borderBottomColor: theme.border }]}>
         <TextInput
           style={[ht.input, { backgroundColor: theme.card, borderColor: theme.border, color: theme.text, flex: 1 }]}
@@ -101,8 +101,7 @@ function HistoryTab({ theme }: { theme: Theme }) {
           <Text style={[ht.actText, { color: theme.danger }]}>🗑</Text>
         </Pressable>
       </View>
-
-      {sorted.length === 0 ? (
+      {sorted.length === 0 && (
         <View style={ht.empty}>
           <Text style={[ht.emptyText, { color: theme.muted }]}>
             {records.length === 0
@@ -110,15 +109,21 @@ function HistoryTab({ theme }: { theme: Theme }) {
               : 'No results match the filter.'}
           </Text>
         </View>
-      ) : (
-        <FlatList
-          data={sorted}
-          keyExtractor={(item) => `${item.taskId}-${item.firedAt}-${item.attempt}`}
-          renderItem={({ item }) => <HistoryRow record={item} theme={theme} />}
-          contentContainerStyle={ht.list}
-        />
       )}
-    </View>
+    </>
+  );
+
+  return (
+    <LegendList<TaskExecutionRecord>
+      style={{ flex: 1 }}
+      data={sorted}
+      keyExtractor={(item: TaskExecutionRecord) => `${item.taskId}-${item.firedAt}-${item.attempt}`}
+      renderItem={({ item }: { item: TaskExecutionRecord }) => <HistoryRow record={item} theme={theme} />}
+      ListHeaderComponent={toolbar}
+      contentContainerStyle={ht.list}
+      estimatedItemSize={72}
+      recycleItems
+    />
   );
 }
 
@@ -220,9 +225,8 @@ function liveColor(line: string, theme: Theme): string {
 function LiveTab({ theme }: { theme: Theme }) {
   const { liveLog, clearLiveLog } = useConductor();
 
-  return (
-    <View style={{ flex: 1 }}>
-      {/* toolbar */}
+  const toolbar = (
+    <>
       <View style={[lt.toolbar, { borderBottomColor: theme.border }]}>
         <View style={lt.dots}>
           <View style={[lt.dot, { backgroundColor: theme.danger }]} />
@@ -236,24 +240,29 @@ function LiveTab({ theme }: { theme: Theme }) {
           <Text style={[lt.actText, { color: theme.danger }]}>🗑</Text>
         </Pressable>
       </View>
-
-      {liveLog.length === 0 ? (
+      {liveLog.length === 0 && (
         <View style={lt.empty}>
           <Text style={[lt.emptyText, { color: theme.muted, fontFamily: MONO }]}>
             — waiting for events —
           </Text>
         </View>
-      ) : (
-        <FlatList
-          data={liveLog}
-          keyExtractor={(_, i) => String(i)}
-          renderItem={({ item }) => (
-            <Text style={[lt.line, { color: liveColor(item, theme), fontFamily: MONO }]}>{item}</Text>
-          )}
-          contentContainerStyle={lt.list}
-        />
       )}
-    </View>
+    </>
+  );
+
+  return (
+    <LegendList<string>
+      style={{ flex: 1 }}
+      data={liveLog}
+      keyExtractor={(_: string, i: number) => String(i)}
+      renderItem={({ item }: { item: string }) => (
+        <Text style={[lt.line, { color: liveColor(item, theme), fontFamily: MONO }]}>{item}</Text>
+      )}
+      ListHeaderComponent={toolbar}
+      contentContainerStyle={lt.list}
+      estimatedItemSize={22}
+      recycleItems
+    />
   );
 }
 
@@ -281,6 +290,7 @@ const lt = StyleSheet.create({
 
 export function LogsScreen() {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const { records, liveLog } = useConductor();
   const [activeTab, setActiveTab] = useState<LogTab>('history');
 
@@ -289,7 +299,7 @@ export function LogsScreen() {
   return (
     <View style={[s.root, { backgroundColor: theme.bg }]}>
       {/* Header */}
-      <View style={[s.header, { borderBottomColor: theme.border }]}>
+      <View style={[s.header, { borderBottomColor: theme.border, paddingTop: insets.top + 10 }]}>
         <View style={s.headerLeft}>
           <Text style={[s.title, { color: theme.text }]}>Logs</Text>
           <View style={[s.countPill, { backgroundColor: theme.card, borderColor: theme.border }]}>
@@ -315,7 +325,6 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: 56,
     paddingBottom: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },

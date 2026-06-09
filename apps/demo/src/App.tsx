@@ -13,6 +13,7 @@
 import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ConductorProvider } from './state/ConductorProvider';
 import { TabBar, type Tab } from './navigation/TabBar';
 import { LabScreen } from './screens/LabScreen';
@@ -54,9 +55,11 @@ function Shell() {
 
 export default function App() {
   return (
-    <ConductorProvider>
-      <Shell />
-    </ConductorProvider>
+    <SafeAreaProvider>
+      <ConductorProvider>
+        <Shell />
+      </ConductorProvider>
+    </SafeAreaProvider>
   );
 }
 

@@ -9,13 +9,14 @@
  */
 import React, { useMemo, useState } from 'react';
 import {
-  FlatList,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LegendList } from '@legendapp/list/react-native';
 import { reconcile, type ReconcileResult, type MatchedOccurrence, type ExpectedOccurrence } from 'expo-conductor';
 import type { TaskExecutionRecord } from 'expo-conductor';
 import { useTheme } from '../theme';
@@ -24,6 +25,12 @@ import { Badge } from '../components/Badge';
 import { Card } from '../components/Card';
 
 type FilterKey = 'all' | 'missed' | 'aborted' | 'unexpected' | 'matched';
+
+type DisplayItem =
+  | { kind: 'matched';    data: MatchedOccurrence }
+  | { kind: 'aborted';    data: MatchedOccurrence }
+  | { kind: 'missed';     data: ExpectedOccurrence }
+  | { kind: 'unexpected'; data: TaskExecutionRecord };
 
 const FILTERS: { id: FilterKey; label: string }[] = [
   { id: 'all',        label: 'All' },
@@ -35,6 +42,7 @@ const FILTERS: { id: FilterKey; label: string }[] = [
 
 export function ReconciliationScreen() {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const { tasks, records, refreshHistory } = useConductor();
   const [activeFilter, setActiveFilter] = useState<FilterKey>('all');
   const [windowH, setWindowH] = useState(24);
@@ -60,13 +68,6 @@ export function ReconciliationScreen() {
     { label: 'Missed',     count: missed.length,     color: theme.danger,     bg: theme.dangerBg },
     { label: 'Unexpected', count: unexpected.length, color: theme.unexpected, bg: theme.unexpectedBg },
   ];
-
-  // Build a unified display list.
-  type DisplayItem =
-    | { kind: 'matched';    data: MatchedOccurrence }
-    | { kind: 'aborted';    data: MatchedOccurrence }
-    | { kind: 'missed';     data: ExpectedOccurrence }
-    | { kind: 'unexpected'; data: TaskExecutionRecord };
 
   const allItems: DisplayItem[] = useMemo(() => {
     const items: DisplayItem[] = [];
@@ -99,10 +100,10 @@ export function ReconciliationScreen() {
     return allItems.filter((i) => i.kind === activeFilter);
   }, [allItems, activeFilter]);
 
-  return (
-    <View style={[styles.root, { backgroundColor: theme.bg }]}>
+  const listHeader = (
+    <>
       {/* Header */}
-      <View style={[styles.header, { borderBottomColor: theme.border }]}>
+      <View style={[styles.header, { borderBottomColor: theme.border, paddingTop: insets.top + 10 }]}>
         <Text style={[styles.title, { color: theme.text }]}>Reconciliation</Text>
         <Pressable onPress={refreshHistory} style={styles.refreshBtn}>
           <Text style={[styles.refreshText, { color: theme.accent }]}>↻</Text>
@@ -182,8 +183,8 @@ export function ReconciliationScreen() {
         </View>
       </ScrollView>
 
-      {/* List */}
-      {filteredItems.length === 0 ? (
+      {/* Empty state */}
+      {filteredItems.length === 0 && (
         <View style={styles.empty}>
           <Text style={[styles.emptyText, { color: theme.muted }]}>
             {allItems.length === 0
@@ -191,15 +192,21 @@ export function ReconciliationScreen() {
               : `No ${activeFilter} items in the selected window.`}
           </Text>
         </View>
-      ) : (
-        <FlatList
-          data={filteredItems}
-          keyExtractor={(item, i) => `${item.kind}-${i}`}
-          renderItem={({ item }) => <ReconcileRow item={item} theme={theme} />}
-          contentContainerStyle={styles.list}
-        />
       )}
-    </View>
+    </>
+  );
+
+  return (
+    <LegendList<DisplayItem>
+      style={[styles.root, { backgroundColor: theme.bg }]}
+      data={filteredItems}
+      keyExtractor={(item: DisplayItem, i: number) => `${item.kind}-${i}`}
+      renderItem={({ item }: { item: DisplayItem }) => <ReconcileRow item={item} theme={theme} />}
+      ListHeaderComponent={listHeader}
+      contentContainerStyle={styles.list}
+      estimatedItemSize={72}
+      recycleItems
+    />
   );
 }
 
@@ -295,7 +302,6 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   header: {
     paddingHorizontal: 16,
-    paddingTop: 56,
     paddingBottom: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',

@@ -2,7 +2,7 @@
   "expo": {
     "name": "Conductor Demo",
     "slug": "expo-conductor-demo",
-    "version": "1.0.1",
+    "version": "1.1.0",
     "runtimeVersion": {
       "policy": "appVersion"
     },
