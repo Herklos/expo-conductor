@@ -6,14 +6,16 @@ interface Props {
   children: React.ReactNode;
   theme: Theme;
   style?: ViewStyle;
+  accentColor?: string;
 }
 
-export function Card({ children, theme, style }: Props) {
+export function Card({ children, theme, style, accentColor }: Props) {
   return (
     <View
       style={[
         styles.card,
         { backgroundColor: theme.card, borderColor: theme.border },
+        accentColor && { borderLeftColor: accentColor, borderLeftWidth: 3 },
         style,
       ]}
     >
@@ -24,9 +26,9 @@ export function Card({ children, theme, style }: Props) {
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: 12,
+    borderRadius: 8,
     padding: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    marginBottom: 10,
+    borderWidth: 1,
+    marginBottom: 8,
   },
 });

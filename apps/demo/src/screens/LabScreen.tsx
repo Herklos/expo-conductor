@@ -296,9 +296,9 @@ export function LabScreen() {
       style={{ flex: 1, backgroundColor: theme.bg }}
       contentContainerStyle={styles.content}
     >
-      <Text style={[styles.screenTitle, { color: theme.text }]}>Cross-Language Lab</Text>
+      <Text style={[styles.screenTitle, { color: theme.text }]}>CROSS-LANGUAGE LAB</Text>
       <Text style={[styles.screenSub, { color: theme.muted }]}>
-        Toggle cells, configure settings, then "Schedule active" to watch them run.
+        Tap a cell to activate · tap again to expand settings · schedule to run
       </Text>
 
       {/* Action bar */}
@@ -363,13 +363,16 @@ export function LabScreen() {
                   active={cell?.active ?? false}
                   scheduled={isScheduled}
                   expanded={cell?.expanded ?? false}
-                  onToggle={() =>
-                    updateCell(key, {
-                      active: !(cell?.active ?? false),
-                      expanded: !(cell?.active ?? false),
-                    })
-                  }
-                  onExpandToggle={() => updateCell(key, { expanded: !(cell?.expanded ?? false) })}
+                  onToggle={() => {
+                    if (!(cell?.active ?? false)) {
+                      // activate + expand
+                      updateCell(key, { active: true, expanded: true });
+                    } else {
+                      // already active → toggle expanded only
+                      updateCell(key, { expanded: !(cell?.expanded ?? false) });
+                    }
+                  }}
+                  onDeactivate={() => updateCell(key, { active: false, expanded: false })}
                   theme={theme}
                 />
               );
@@ -422,6 +425,7 @@ export function LabScreen() {
                 langColor={lang.color}
                 cell={cell}
                 onChange={(patch) => updateCell(key, patch)}
+                onDeactivate={() => updateCell(key, { active: false, expanded: false })}
                 theme={theme}
               />
             );
@@ -445,7 +449,7 @@ interface CellToggleProps {
   scheduled: boolean;
   expanded: boolean;
   onToggle: () => void;
-  onExpandToggle: () => void;
+  onDeactivate: () => void;
   theme: ReturnType<typeof useTheme>;
 }
 
@@ -454,14 +458,14 @@ function CellToggle({
   available,
   active,
   scheduled,
+  expanded,
   onToggle,
-  onExpandToggle,
   theme,
 }: CellToggleProps) {
   if (!available) {
     return (
       <View style={[styles.cell, styles.cellDisabled, { borderColor: theme.border }]}>
-        <Text style={{ color: theme.disabled, fontSize: 10 }}>N/A</Text>
+        <Text style={{ color: theme.disabled, fontSize: 9, letterSpacing: 0.5 }}>N/A</Text>
       </View>
     );
   }
@@ -472,20 +476,24 @@ function CellToggle({
         styles.cell,
         {
           borderColor: active ? langColor : theme.border,
-          backgroundColor: active ? `${langColor}18` : 'transparent',
+          backgroundColor: active ? `${langColor}15` : 'transparent',
         },
       ]}
       onPress={onToggle}
-      onLongPress={onExpandToggle}
       accessibilityRole="checkbox"
       accessibilityState={{ checked: active }}
     >
       <View
         style={[
           styles.cellDot,
-          { backgroundColor: active ? langColor : theme.border },
+          { backgroundColor: active ? langColor : theme.disabled },
         ]}
       />
+      {active && (
+        <Text style={[styles.cellArrow, { color: langColor }]}>
+          {expanded ? '▴' : '▾'}
+        </Text>
+      )}
       {scheduled && (
         <View style={[styles.scheduledDot, { backgroundColor: theme.success }]} />
       )}
@@ -498,13 +506,19 @@ interface CellSettingsProps {
   langColor: string;
   cell: CellSettings;
   onChange: (patch: Partial<CellSettings>) => void;
+  onDeactivate: () => void;
   theme: ReturnType<typeof useTheme>;
 }
 
-function CellSettings({ langLabel, langColor, cell, onChange, theme }: CellSettingsProps) {
+function CellSettings({ langLabel, langColor, cell, onChange, onDeactivate, theme }: CellSettingsProps) {
   return (
     <View style={[styles.settingsPanel, { borderColor: langColor }]}>
-      <Text style={[styles.settingsTitle, { color: langColor }]}>{langLabel} settings</Text>
+      <View style={styles.settingsTitleRow}>
+        <Text style={[styles.settingsTitle, { color: langColor }]}>{langLabel.toUpperCase()}</Text>
+        <Pressable onPress={onDeactivate} style={[styles.deactivateBtn, { borderColor: theme.border }]}>
+          <Text style={[styles.deactivateBtnText, { color: theme.muted }]}>DEACTIVATE</Text>
+        </Pressable>
+      </View>
 
       {/* Priority */}
       <Text style={[styles.settingsLabel, { color: theme.muted }]}>Priority</Text>
@@ -597,60 +611,64 @@ function CellSettings({ langLabel, langColor, cell, onChange, theme }: CellSetti
 
 const styles = StyleSheet.create({
   content: { padding: 16, paddingTop: 56 },
-  screenTitle: { fontSize: 22, fontWeight: '700', marginBottom: 4 },
-  screenSub: { fontSize: 13, marginBottom: 16, lineHeight: 18 },
+  screenTitle: { fontSize: 14, fontWeight: '800', letterSpacing: 2, marginBottom: 4 },
+  screenSub: { fontSize: 11, marginBottom: 16, lineHeight: 17 },
   actionRow: { flexDirection: 'row', gap: 10, marginBottom: 8 },
-  btn: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
-  btnText: { color: '#fff', fontWeight: '600', fontSize: 13 },
-  status: { fontSize: 12, marginBottom: 10, textAlign: 'center' },
+  btn: { flex: 1, paddingVertical: 10, borderRadius: 6, alignItems: 'center' },
+  btnText: { color: '#fff', fontWeight: '700', fontSize: 12, letterSpacing: 0.5 },
+  status: { fontSize: 11, marginBottom: 10, textAlign: 'center' },
 
   headerRow: { flexDirection: 'row', marginBottom: 4, paddingHorizontal: 2 },
   archetypeLabel: { flex: 2, justifyContent: 'center' },
   colHeader: { flex: 1, alignItems: 'center' },
-  colHeaderText: { fontSize: 11, fontWeight: '700' },
+  colHeaderText: { fontSize: 10, fontWeight: '800', letterSpacing: 1 },
 
-  archetypeCard: { padding: 10, marginBottom: 8 },
+  archetypeCard: { padding: 10, marginBottom: 6 },
   archetypeRow: { flexDirection: 'row', alignItems: 'center', minHeight: 44 },
-  archetypeIcon: { fontSize: 18, marginRight: 6 },
-  archetypeText: { fontSize: 13, fontWeight: '500' },
+  archetypeIcon: { fontSize: 16, marginRight: 6 },
+  archetypeText: { fontSize: 12, fontWeight: '600' },
 
   cell: {
     flex: 1,
     height: 40,
     marginHorizontal: 3,
-    borderRadius: 8,
+    borderRadius: 5,
     borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
   },
   cellDisabled: { opacity: 0.35 },
-  cellDot: { width: 10, height: 10, borderRadius: 5 },
+  cellDot: { width: 8, height: 8, borderRadius: 4 },
+  cellArrow: { fontSize: 9, position: 'absolute', bottom: 3 },
   scheduledDot: {
     position: 'absolute',
     top: 4,
     right: 4,
-    width: 6,
-    height: 6,
+    width: 5,
+    height: 5,
     borderRadius: 3,
   },
 
   settingsPanel: {
-    marginTop: 8,
+    marginTop: 10,
     borderLeftWidth: 3,
     paddingLeft: 10,
-    paddingTop: 4,
-    paddingBottom: 4,
+    paddingTop: 6,
+    paddingBottom: 6,
   },
-  settingsTitle: { fontSize: 12, fontWeight: '700', marginBottom: 6 },
-  settingsLabel: { fontSize: 11, marginTop: 4, marginBottom: 4 },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 4 },
+  settingsTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  settingsTitle: { fontSize: 10, fontWeight: '800', letterSpacing: 1.5 },
+  deactivateBtn: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 3, borderWidth: 1 },
+  deactivateBtnText: { fontSize: 8, fontWeight: '700', letterSpacing: 0.8 },
+  settingsLabel: { fontSize: 9, fontWeight: '700', letterSpacing: 1, marginTop: 5, marginBottom: 3 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginBottom: 4 },
   chip: {
     paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 8,
-    borderWidth: 1,
+    paddingHorizontal: 9,
+    borderRadius: 4,
+    borderWidth: 1.5,
   },
-  chipText: { fontSize: 11, fontWeight: '600' },
+  chipText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.3 },
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',

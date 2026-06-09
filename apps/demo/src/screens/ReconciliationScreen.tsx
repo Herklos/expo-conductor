@@ -33,11 +33,11 @@ type DisplayItem =
   | { kind: 'unexpected'; data: TaskExecutionRecord };
 
 const FILTERS: { id: FilterKey; label: string }[] = [
-  { id: 'all',        label: 'All' },
-  { id: 'missed',     label: '🔴 Missed' },
-  { id: 'aborted',    label: '🟠 Aborted' },
-  { id: 'unexpected', label: '🟣 Unexpected' },
-  { id: 'matched',    label: '🟢 Matched' },
+  { id: 'all',        label: 'ALL' },
+  { id: 'missed',     label: 'MISSED' },
+  { id: 'aborted',    label: 'ABORTED' },
+  { id: 'unexpected', label: 'UNEXPECT' },
+  { id: 'matched',    label: 'MATCHED' },
 ];
 
 export function ReconciliationScreen() {
@@ -63,10 +63,10 @@ export function ReconciliationScreen() {
   const abortedSet = new Set(aborted.map((a) => a.record.taskId + '-' + a.record.firedAt));
 
   const summaryStats = [
-    { label: 'Matched',    count: matched.length,    color: theme.success,    bg: theme.successBg },
-    { label: 'Aborted',    count: aborted.length,    color: theme.warning,    bg: theme.warningBg },
-    { label: 'Missed',     count: missed.length,     color: theme.danger,     bg: theme.dangerBg },
-    { label: 'Unexpected', count: unexpected.length, color: theme.unexpected, bg: theme.unexpectedBg },
+    { label: 'MATCHED',    count: matched.length,    color: theme.success },
+    { label: 'ABORTED',    count: aborted.length,    color: theme.warning },
+    { label: 'MISSED',     count: missed.length,     color: theme.danger },
+    { label: 'UNEXPECT',   count: unexpected.length, color: theme.unexpected },
   ];
 
   const allItems: DisplayItem[] = useMemo(() => {
@@ -114,7 +114,7 @@ export function ReconciliationScreen() {
       <View style={styles.summaryArea}>
         <View style={styles.summaryRow}>
           {summaryStats.map((s) => (
-            <View key={s.label} style={[styles.statCard, { backgroundColor: s.bg }]}>
+            <View key={s.label} style={[styles.statCard, { borderColor: s.color }]}>
               <Text style={[styles.statCount, { color: s.color }]}>{s.count}</Text>
               <Text style={[styles.statLabel, { color: s.color }]}>{s.label}</Text>
             </View>
@@ -313,9 +313,9 @@ const styles = StyleSheet.create({
   refreshText: { fontSize: 20, fontWeight: '700' },
   summaryArea: { padding: 12 },
   summaryRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
-  statCard: { flex: 1, borderRadius: 10, padding: 10, alignItems: 'center' },
-  statCount: { fontSize: 22, fontWeight: '700' },
-  statLabel: { fontSize: 10, fontWeight: '600', marginTop: 2 },
+  statCard: { flex: 1, borderRadius: 6, padding: 10, alignItems: 'center', borderWidth: 1.5 },
+  statCount: { fontSize: 24, fontWeight: '800' },
+  statLabel: { fontSize: 8, fontWeight: '800', letterSpacing: 1, marginTop: 3 },
   windowRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   windowLabel: { fontSize: 12 },
   windowChip: {
@@ -336,11 +336,11 @@ const styles = StyleSheet.create({
   filterRow: { flexDirection: 'row', paddingHorizontal: 12, gap: 8, paddingVertical: 4 },
   filterChip: {
     paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 8,
-    borderWidth: 1,
+    paddingVertical: 6,
+    borderRadius: 4,
+    borderWidth: 1.5,
   },
-  filterChipText: { fontSize: 12, fontWeight: '600' },
+  filterChipText: { fontSize: 9, fontWeight: '800', letterSpacing: 1 },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 },
   emptyText: { fontSize: 14, textAlign: 'center', lineHeight: 22 },
   list: { padding: 12, paddingBottom: 20 },

@@ -11,6 +11,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Updates from 'expo-updates';
 import Conductor from 'expo-conductor';
 import {
@@ -52,22 +53,19 @@ function Section({
 }) {
   return (
     <View style={sec.wrap}>
-      <View style={sec.header}>
-        <View style={[sec.line, { backgroundColor: theme.border }]} />
-        <Text style={[sec.title, { color: theme.muted, fontFamily: MONO }]}>{title}</Text>
-        <View style={[sec.line, { backgroundColor: theme.border }]} />
+      <View style={[sec.header, { borderLeftColor: theme.accent }]}>
+        <Text style={[sec.title, { color: theme.accent, fontFamily: MONO }]}>{title}</Text>
       </View>
-      <Text style={[sec.desc, { color: theme.muted }]}>{desc}</Text>
+      {desc !== '' && <Text style={[sec.desc, { color: theme.muted }]}>{desc}</Text>}
       {children}
     </View>
   );
 }
 const sec = StyleSheet.create({
-  wrap: { marginTop: 8, marginBottom: 4 },
-  header: { flexDirection: 'row', alignItems: 'center', marginBottom: 5 },
-  line: { flex: 1, height: StyleSheet.hairlineWidth },
-  title: { fontSize: 9, fontWeight: '700', letterSpacing: 2, marginHorizontal: 10 },
-  desc: { fontSize: 11, marginBottom: 10, lineHeight: 16 },
+  wrap: { marginTop: 16, marginBottom: 4 },
+  header: { borderLeftWidth: 3, paddingLeft: 10, marginBottom: 6 },
+  title: { fontSize: 9, fontWeight: '800', letterSpacing: 2.5 },
+  desc: { fontSize: 11, marginBottom: 10, lineHeight: 16, paddingLeft: 2 },
 });
 
 // ─── Outlined action button ───────────────────────────────────────────────────
@@ -100,8 +98,8 @@ function Btn({
   );
 }
 const btn = StyleSheet.create({
-  b: { paddingVertical: 6, paddingHorizontal: 13, borderRadius: 6, borderWidth: 1.5 },
-  t: { fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
+  b: { paddingVertical: 7, paddingHorizontal: 14, borderRadius: 4, borderWidth: 1.5 },
+  t: { fontSize: 10, fontWeight: '800', letterSpacing: 1 },
 });
 
 // ─── Trigger mode selector ────────────────────────────────────────────────────
@@ -387,21 +385,22 @@ const ir = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingVertical: 8,
+    paddingVertical: 9,
     paddingHorizontal: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 8,
+    borderWidth: 1,
+    borderRadius: 6,
     marginBottom: 6,
   },
   text: { flex: 1 },
-  lab: { fontSize: 12, fontWeight: '700' },
-  val: { fontSize: 11, marginTop: 1 },
+  lab: { fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
+  val: { fontSize: 10, marginTop: 2 },
 });
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export function LifecycleScreen() {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const { tasks, refresh, triggerMode, setTriggerMode, scheduleConfig, setScheduleConfig } = useConductor();
   const [conductorStatus, setConductorStatus] = useState<string | null>(null);
   const [permGranted, setPermGranted] = useState<boolean | null>(null);
@@ -425,7 +424,7 @@ export function LifecycleScreen() {
 
   return (
     <View style={[s.root, { backgroundColor: theme.bg }]}>
-      <ScrollView contentContainerStyle={s.scroll}>
+      <ScrollView contentContainerStyle={[s.scroll, { paddingTop: insets.top + 16 }]}>
 
         {/* ── Page header ── */}
         <View style={[s.header, { borderBottomColor: theme.border }]}>
@@ -686,7 +685,7 @@ export function LifecycleScreen() {
 
 const s = StyleSheet.create({
   root: { flex: 1 },
-  scroll: { paddingHorizontal: 16, paddingTop: 56, paddingBottom: 16 },
+  scroll: { paddingHorizontal: 16, paddingBottom: 16 },
 
   header: {
     flexDirection: 'row',

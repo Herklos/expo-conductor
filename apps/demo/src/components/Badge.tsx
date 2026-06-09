@@ -6,32 +6,48 @@ interface Props {
   color: string;
   bg: string;
   small?: boolean;
+  outlined?: boolean;
 }
 
-export function Badge({ label, color, bg, small }: Props) {
+export function Badge({ label, color, bg, small, outlined }: Props) {
   return (
-    <View style={[styles.badge, { backgroundColor: bg }, small && styles.small]}>
-      <Text style={[styles.label, { color }, small && styles.labelSmall]}>{label}</Text>
+    <View
+      style={[
+        styles.badge,
+        { backgroundColor: outlined ? 'transparent' : bg, borderColor: color },
+        outlined && styles.outlined,
+        small && styles.small,
+      ]}
+    >
+      <Text style={[styles.label, { color }, small && styles.labelSmall]}>
+        {label.toUpperCase()}
+      </Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   badge: {
-    paddingHorizontal: 8,
+    paddingHorizontal: 7,
     paddingVertical: 3,
-    borderRadius: 99,
+    borderRadius: 4,
     alignSelf: 'flex-start',
+    borderWidth: 0,
+  },
+  outlined: {
+    borderWidth: 1,
   },
   small: {
-    paddingHorizontal: 6,
+    paddingHorizontal: 5,
     paddingVertical: 2,
   },
   label: {
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.6,
   },
   labelSmall: {
-    fontSize: 10,
+    fontSize: 9,
+    letterSpacing: 0.5,
   },
 });
