@@ -97,24 +97,25 @@ cargo build --manifest-path path/to/your/rust/Cargo.toml \
   --target aarch64-apple-ios-sim --release
 ```
 
-## Execution history & reconciliation
+## Execution history, `firedBy` & reconciliation
 
 ```ts
 import Conductor from '@drakkar.software/expo-conductor';
-import { foldHistory } from '@drakkar.software/expo-conductor/history';
-import { reconcile } from '@drakkar.software/expo-conductor/reconcile';
+import { foldHistory, reconcile } from '@drakkar.software/expo-conductor';
 
 // Raw lifecycle events persisted by the native layer (survives headless runs).
 const events = await Conductor.getHistory();
 
-// Fold events into paired records: { taskId, firedAt, result, durationMs, ... }
+// Fold events into paired records: { taskId, firedAt, firedBy, result, durationMs, ... }
+// `firedBy` is 'manual' for explicit runNow() calls, or a TriggerType string when
+// the scheduler fired it (e.g. 'alarm', 'recurrence', 'push').
 const records = foldHistory(events);
 
 // Compare expected occurrences against actual records.
-const tasks = await Conductor.getScheduled();
+const tasks = await Conductor.getTasks();
 const { matched, missed, unexpected, aborted } = reconcile(tasks, records, {
-  toleranceMs: 16 * 60_000,   // 16 min default — covers OS jitter + WorkManager flex
-  windowMs:    24 * 60 * 60_000,
+  now: Date.now(),
+  windowMs: 24 * 60 * 60_000,
 });
 ```
 
@@ -125,9 +126,18 @@ tolerance). `aborted` = matched records whose `result` is `'failed'` or `'error'
 Reconciliation is exact for `time`, `recurrence`, and `alarm` triggers. For `background`
 and `push` triggers it is **advisory** — the OS decides timing, not the scheduler.
 
+## v0.4.0 additions
+
+- **`firedBy`** on `onTaskExecute`, `onTaskComplete`, `onTaskError` event payloads and on `TaskExecutionRecord` — reports which trigger source caused the run (`'manual'` for `runNow()`, or a `TriggerType` string).
+- **`NotificationTrigger.recurring`** — re-arms the notification `inSeconds` after each delivery; clock drift doesn't accumulate.
+- **`AlarmTrigger.windowMs`** (Android only) — use `AlarmManager.setWindow` for battery-efficient batching instead of `setExact`.
+- **`ContinuedProcessingTrigger`** (`type: 'userInitiatedBackground'`, iOS 26+ only) — `BGContinuedProcessingTask`; must originate from a direct user interaction.
+- **Silent APNs → BGProcessingTask chain** (iOS) — a silent push matching a `push` trigger with `bgProcessing:true` on a companion `background` trigger submits a full BGProcessingTask slot.
+- **FCM Doze-bypass foreground service** (Android) — `policy.foreground: true` + FCM push starts a foreground service instead of a WorkManager job. Requires `enableForegroundService: true` in the config plugin.
+
 See the [full documentation](../../README.md) for triggers, policy/weight/priority, the
 config plugin options (`enableFcm`, `enablePush`, `enableExactAlarms`, `useExactAlarmClock`,
-`backgroundTaskIdentifiers`, `enableRust`), platform support matrix, and the device test guide.
+`backgroundTaskIdentifiers`, `enableRust`, `enableForegroundService`), platform support matrix, and the device test guide.
 
 ## Scripts
 

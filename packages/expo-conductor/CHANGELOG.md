@@ -7,6 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-09
+
+### Added
+
+- **`FiredBy` field on event payloads and history records** — `TaskEventPayload`,
+  `TaskErrorEventPayload`, `TaskResultEventPayload`, and `TaskExecutionEvent` now carry an
+  optional `firedBy?: FiredBy` (`TriggerType | 'manual'`) that reports which trigger caused
+  the execution. `'manual'` when triggered explicitly via `runNow()` or
+  `runDueTasks()`; a `TriggerType` string when the scheduler fired it.
+  `TaskExecutionRecord` (produced by `foldHistory`) also exposes `firedBy`.
+  **Best-effort on native for multi-trigger tasks** — a worker only knows the winner
+  from the last `computeNextRunAt` result; prefer single-trigger tasks for precise
+  attribution.
+
+- **`NotificationTrigger.recurring?: boolean`** — when `true` and `inSeconds` is set,
+  the notification trigger re-arms itself after each delivery: after firing, the engine
+  re-computes `now + inSeconds * 1000` and schedules a new notification at that time.
+  Clock drift does not accumulate because the interval is re-derived from `now` at each
+  re-arm. Only meaningful with `inSeconds` (a fixed `at` timestamp cannot recur).
+
+- **`AlarmTrigger.windowMs?: number`** (Android only) — use
+  `AlarmManager.setWindow(RTC_WAKEUP, at, windowMs, …)` instead of `setExact`. The OS
+  may fire anywhere in the `[at, at + windowMs]` window, enabling battery-efficient
+  batching when exact timing is not required. Ignored when exact alarms are not available
+  (falls back to inexact). Ignored on iOS and Web.
+
+- **`ContinuedProcessingTrigger` (`type: 'userInitiatedBackground'`)** (iOS 26+ only) —
+  submit a `BGContinuedProcessingTask` that continues after the user backgrounds the app.
+  The task must originate from a direct user action (button press, etc.); the OS denies
+  requests without user context. Not subject to the ~30-minute BGProcessingTask cap.
+  Silently ignored on iOS < 26 and on Android/Web.
+
+- **Silent APNs → BGProcessingTask chain** (iOS only) — a silent APNs push
+  (`content-available: 1`, no alert) matching a `push` trigger with `matchKey` now also
+  submits a `BGProcessingTaskRequest` immediately, so the task gets a full BGProcessingTask
+  slot (~30 min CPU + network) in addition to the short background-receipt window. Requires
+  `bgProcessing: true` on the matching `BackgroundTaskTrigger` alongside the `push`
+  trigger. No new API surface — the behavior is gated on the existing
+  `BackgroundTaskTrigger.bgProcessing` field.
+
+- **FCM Doze-bypass foreground service** (Android only) — when a task has
+  `policy.foreground: true` and is matched by an FCM high-priority push, `ConductorFcmService`
+  now starts a foreground service (`ConductorForegroundService`) instead of enqueuing a
+  WorkManager job, bypassing Doze entirely. Requires `enableForegroundService: true` in the
+  config plugin (injects `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_DATA_SYNC`
+  permissions and the service declaration).
+
+### Changed
+
+- `Trigger` union now includes `ContinuedProcessingTrigger`; `TriggerType` includes
+  `'userInitiatedBackground'`. Backward-compatible (existing code does not produce this
+  variant unless the app explicitly declares it).
+- Default BGTaskScheduler permitted identifiers in the config plugin now include
+  `software.drakkar.expoconductor.continued` for the iOS 26+ continued-processing task.
+
+### Tests
+
+- `firedBy` propagation is covered by existing `onTaskExecute`/`onTaskComplete` event
+  tests; the new field is verified end-to-end in the demo's History screen.
+- `recurring` notification re-arm, `windowMs` alarm path, and APNs→BGProcessingTask chain
+  are exercised in the demo app's trigger lab; fixture cases for the recurring-notification
+  re-arm timing are deferred pending cross-platform verification.
+
+### Known limitations
+
+- `ContinuedProcessingTrigger` requires iOS 26+ (`BGContinuedProcessingTask` from
+  WWDC 2025); on earlier OS versions the trigger is silently ignored.
+- `AlarmTrigger.windowMs` is Android-only; iOS falls back to a notification regardless.
+- `firedBy` attribution for multi-trigger native tasks is heuristic — the native worker
+  reports the trigger type predicted during the previous `computeNextRunAt`, not the actual
+  OS wake event.
+- The silent APNs→BGProcessingTask chain requires both a `push` and a `background` trigger
+  with `bgProcessing: true` on the same task definition.
+
 ## [0.3.0] - 2026-06-09
 
 ### Added
@@ -263,7 +337,10 @@ cannot run after the app is terminated (use a **native** handler for headless wo
 native `BGTaskScheduler` / `WorkManager` ↔ `expo-background-task` swap is deferred pending
 on-device verification.
 
-[Unreleased]: https://github.com/herklos/expo-conductor/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/herklos/expo-conductor/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/herklos/expo-conductor/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/herklos/expo-conductor/compare/v0.2.2...v0.3.0
+[0.2.2]: https://github.com/herklos/expo-conductor/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/herklos/expo-conductor/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/herklos/expo-conductor/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/herklos/expo-conductor/compare/v0.1.0...v0.1.1

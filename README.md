@@ -78,18 +78,25 @@ What the engine can actually *do*, though, depends on the OS underneath it.
 | Run while the app is alive (JS handler) | ✅ | ✅ | ✅ |
 | Run **after the app is terminated** (native handler) | ✅ | ✅ | ❌ |
 | Deferrable background execution | ✅ | ✅ ¹ | ⚠️ ² |
+| Long-running background task (~30 min, BGProcessingTask) | ➖ | ✅ ¹ | ➖ |
+| User-initiated continued background task (iOS 26+) | ➖ | ✅ ⁵ | ➖ |
 | Exact wall-clock alarms | ✅ | ⚠️ ³ | ⚠️ |
-| User-visible notifications | ✅ | ✅ | ❌ |
+| Windowed exact alarm (battery-efficient batching) | ✅ | ➖ | ➖ |
+| User-visible notifications (+ recurring re-arm) | ✅ | ✅ | ❌ |
 | Server-driven push (`push` trigger) | ✅ ⁴ | ✅ | ❌ |
+| Silent APNs → BGProcessingTask chain | ➖ | ✅ | ➖ |
+| FCM push → foreground service (survives Doze) | ✅ ⁴ | ➖ | ➖ |
 | `appState` (foreground / background) | ✅ | ✅ | ✅ |
 | Priority + resource-budget admission control | ✅ | ✅ | ✅ |
 | Policy constraints (charging / network / idle / battery / window / expiry) | ✅ | ✅ | ✅ |
+| Execution history + `firedBy` attribution | ✅ | ✅ | ✅ |
 | Single-flight across app instances | ➖ | ➖ | ✅ |
 
 ¹ Opportunistic timing; intervals are advisory and it does **not** run on the iOS Simulator.
 ² Depends on Periodic Background Sync availability.
 ³ iOS has no exact-alarm API — falls back to a scheduled local notification.
-⁴ Requires `enableFcm` in the config plugin (and a Firebase setup).
+⁴ Requires `enableFcm: true` in the config plugin (and a Firebase setup).
+⁵ Requires iOS 26+; silently ignored on earlier OS versions. Must originate from a direct user action.
 
 The OS primitive behind each trigger is in the [Triggers](#triggers) table; see
 **[Platform support & limitations](#platform-support--limitations)** for the full detail.
@@ -131,13 +138,15 @@ A task fires when **any** of its triggers fire. Supported trigger types:
 | --- | --- | --- | --- | --- |
 | `time` (at / inSeconds) | WorkManager | UNNotification | `setTimeout` | one-shot |
 | `recurrence` (interval/daily/weekly/cron) | Periodic WorkManager | BGTaskScheduler (silent) | `setInterval` | repeating |
-| `notification` | NotificationManagerCompat (auto channel) | UNUserNotificationCenter | timer only (no UI) | user-visible on iOS/Android |
-| `alarm` (exact) | AlarmManager (`setExactAndAllowWhileIdle`) | ⚠︎ notification fallback | `setTimeout` | exact wall-clock |
-| `background` (deferrable) | WorkManager | BGAppRefreshTask | Periodic Background Sync | OS-optimized |
-| `push` (FCM/APNs data message) | FirebaseMessagingService* | APNs remote-notification | — | server-driven |
+| `notification` (+ `recurring`) | NotificationManagerCompat (auto channel) | UNUserNotificationCenter | timer only (no UI) | user-visible; `recurring:true` re-arms after each delivery |
+| `alarm` (exact; + `windowMs`) | AlarmManager (`setExactAndAllowWhileIdle` or `setWindow`) | ⚠︎ notification fallback | `setTimeout` | `windowMs` enables battery-efficient batching on Android |
+| `background` (+ `bgProcessing`) | WorkManager | BGAppRefreshTask / BGProcessingTask | Periodic Background Sync | `bgProcessing:true` uses ~30 min slot on iOS |
+| `push` (FCM/APNs data message) | FirebaseMessagingService† | APNs remote-notification | — | server-driven; `policy.foreground:true` → FGS on Android† |
 | `appState` | lifecycle | lifecycle | visibility | fg/bg transitions |
+| `userInitiatedBackground` | ➖ | BGContinuedProcessingTask ‡ | ➖ | iOS 26+ only; must originate from user action |
 
-\* FCM requires `enableFcm: true` in the config plugin and a Firebase setup.
+† FCM requires `enableFcm: true` in the config plugin and a Firebase setup. `policy.foreground: true` starts a foreground service to survive Doze; requires `enableForegroundService: true`.  
+‡ `BGContinuedProcessingTask` is iOS 26+; silently ignored on earlier OS versions.
 
 On **web**, `appState` triggers fire from `visibilitychange` (supplemented by window
 focus/blur): a task with `{ type: 'appState', on: 'foreground' }` fires when the tab
@@ -300,24 +309,51 @@ a custom backend.
 ```ts
 import Conductor from 'expo-conductor';
 
+// Handler registration
 Conductor.defineTask(name, handler)          // register a JS handler (call at module scope!)
 Conductor.undefineTask(name)                 // remove a JS handler
-Conductor.isTaskDefined(name)                // is a JS handler registered? -> boolean
-Conductor.getDefinedTaskNames()              // names of registered JS handlers -> string[]
+Conductor.isTaskDefined(name)                // boolean
+Conductor.getDefinedTaskNames()              // string[]
+
+// Scheduling
 await Conductor.schedule(def, handler?)      // register handler + task definition
 await Conductor.defineTaskDefinition(def)    // register a definition (handler registered separately)
 await Conductor.cancelTask(id)
-await Conductor.getTasks()
-await Conductor.runNow(id)                    // fire immediately, bypassing policy/budget
-await Conductor.setResourceBudget(budget)
-await Conductor.pause() / Conductor.resume()
-await Conductor.getStatus()                   // 'available' | 'restricted' | 'unsupported'
-await Conductor.requestPermissions()          // request notification permission -> boolean granted
+await Conductor.getTasks()                   // RegisteredTask[]
+await Conductor.runNow(id)                   // fire immediately, bypassing policy/budget
 
-Conductor.addListener('onTaskExecute',  (p) => {})
-Conductor.addListener('onTaskComplete', (p) => {})  // includes result
-Conductor.addListener('onTaskSkipped',  (p) => {})  // includes reason
-Conductor.addListener('onTaskError',    (p) => {})
+// Runtime control
+await Conductor.setResourceBudget(budget)    // { cpu, network, battery, memory } each 0..1
+await Conductor.pause()                      // suspend all dispatch
+await Conductor.resume()                     // re-arm all tasks
+await Conductor.getStatus()                  // 'available' | 'restricted' | 'unsupported'
+await Conductor.requestPermissions()         // request notification permission -> boolean
+
+// Execution history (persisted ring buffer, survives termination)
+await Conductor.getHistory()                 // TaskExecutionEvent[]  (raw lifecycle events)
+await Conductor.clearHistory()               // clear the ring buffer
+
+// Events — payload includes `firedBy?: FiredBy` ('manual' | TriggerType) from v0.4.0
+Conductor.addListener('onTaskExecute',  (p) => {})  // { taskId, triggerType, firedBy, firedAt, attempt, data }
+Conductor.addListener('onTaskComplete', (p) => {})  // adds: result
+Conductor.addListener('onTaskSkipped',  (p) => {})  // { taskId, reason }
+Conductor.addListener('onTaskError',    (p) => {})  // adds: error
+```
+
+#### `foldHistory` and `reconcile`
+
+```ts
+import { foldHistory, reconcile } from 'expo-conductor';
+
+// Fold raw events into paired records { taskId, firedAt, firedBy, result, durationMs, … }
+const records = foldHistory(await Conductor.getHistory());
+
+// Compare expected vs actual — exact for time/recurrence/alarm, advisory for background/push
+const tasks = await Conductor.getTasks();
+const { matched, missed, unexpected, aborted } = reconcile(tasks, records, {
+  now: Date.now(),
+  windowMs: 24 * 60 * 60_000,   // look-back window
+});
 ```
 
 ## Optional first-party integrations
