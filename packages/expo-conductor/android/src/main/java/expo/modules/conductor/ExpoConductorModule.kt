@@ -170,6 +170,10 @@ class ExpoConductorModule : Module() {
             @Suppress("UNCHECKED_CAST")
             val granted = when (val v = value) {
               is Boolean -> v
+              // expo-modules-core resolves with Bundle{permName -> Bundle{granted, status, ...}}
+              is android.os.Bundle ->
+                v.getBundle(android.Manifest.permission.POST_NOTIFICATIONS)
+                  ?.getBoolean("granted") == true
               is Map<*, *> ->
                 v["granted"] == true ||
                   v.values.any { inner -> (inner as? Map<*, *>)?.get("granted") == true }
