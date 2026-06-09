@@ -177,7 +177,7 @@ class ExpoConductorModule : Module() {
             }
             promise.resolve(granted)
           }
-          override fun reject(code: String, message: String?, cause: Throwable?) =
+          override fun reject(code: String?, message: String?, cause: Throwable?) =
             promise.reject(code, message, cause)
           override fun reject(exception: CodedException) =
             promise.reject(exception)
