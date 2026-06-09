@@ -5,6 +5,38 @@ to change across native code, types, and the config plugin.
 
 ---
 
+## Priority summary
+
+| # | Feature                             | Platform      | Impact                                    | Effort   | Priority |
+|---|-------------------------------------|---------------|-------------------------------------------|----------|----------|
+| 1 | Foreground Service Worker           | Android       | Long-running, Doze-safe tasks             | 3–4 h    | P1       |
+| 4 | BGProcessingTask trigger            | iOS           | 30-min background window                  | 4–5 h    | P1       |
+| 5 | APNs → BGProcessingTask chain       | iOS           | Near-real-time background                 | 2 h      | P2       |
+| 6 | Recurring notification trigger      | All platforms | Repeating notification-driven cadence     | 3–4 h    | P2       |
+| 2 | FCM Doze bypass (foreground svc)    | Android       | Doze-proof FCM tasks                      | 1 h      | P2       |
+| 7 | System broadcast triggers           | Android       | Charging/BT/USB/locale event tasks        | 2–3 h    | P2       |
+| 8 | Geofence trigger                    | Android       | Location-boundary task firing             | 3–4 h    | P2       |
+| 9 | Activity Recognition transitions    | Android       | Motion-state task firing                  | 2–3 h    | P2       |
+|12 | Significant Location Change         | iOS           | ~500m-movement background wakeup          | 2–3 h    | P2       |
+|13 | Region Monitoring (geofence)        | iOS           | Location-boundary task firing             | 1–2 h    | P2       |
+|10 | BLE device-presence scan            | Android       | BLE advertisement wakeup                  | 2–3 h    | P2       |
+|18 | BGContinuedProcessingTask (iOS 26+) | iOS           | User-initiated long-running background    | 2–3 h    | P2       |
+| 3 | Windowed exact alarm                | Android       | Battery-friendly timing                   | 30 min   | P3       |
+|11 | ContentUri job trigger              | Android       | ContentProvider change wakeup             | 1–2 h    | P3       |
+|14 | Location Visit Monitoring           | iOS           | Arrival/departure wakeup                  | 1 h      | P3       |
+|15 | Core Bluetooth state restoration    | iOS           | BLE advertisement/connection wakeup       | 3–4 h    | P3       |
+|16 | URLSession background transfer      | iOS           | Transfer-completion wakeup                | 2–3 h    | P3       |
+|17 | HealthKit background delivery       | iOS           | Health-data-change wakeup                 | 3–4 h    | P3       |
+
+Implement #1 and #4 first — they unlock long-running task support which is the
+main gap between the current implementation and full production use.
+
+**Android 15 note:** If/when #1 (Foreground Service Worker) is implemented, add
+`onTimeout()` handling — `dataSync` FGS type is capped at 6 hours per 24h on
+Android 15; exceeding it without calling `stopSelf()` in `onTimeout()` causes an ANR.
+
+---
+
 ## Android
 
 ### 1. Foreground Service Worker
@@ -550,34 +582,3 @@ iOS — `ConductorAppDelegate.swift` (NotificationDelegate path)
 **Effort:** ~3–4 h (web: ~1 h; Android: ~1–1.5 h; iOS: ~1–1.5 h)  
 **Priority:** P2
 
----
-
-## Priority summary
-
-| # | Feature                             | Platform      | Impact                                    | Effort   | Priority |
-|---|-------------------------------------|---------------|-------------------------------------------|----------|----------|
-| 1 | Foreground Service Worker           | Android       | Long-running, Doze-safe tasks             | 3–4 h    | P1       |
-| 4 | BGProcessingTask trigger            | iOS           | 30-min background window                  | 4–5 h    | P1       |
-| 5 | APNs → BGProcessingTask chain       | iOS           | Near-real-time background                 | 2 h      | P2       |
-| 6 | Recurring notification trigger      | All platforms | Repeating notification-driven cadence     | 3–4 h    | P2       |
-| 2 | FCM Doze bypass (foreground svc)    | Android       | Doze-proof FCM tasks                      | 1 h      | P2       |
-| 7 | System broadcast triggers           | Android       | Charging/BT/USB/locale event tasks        | 2–3 h    | P2       |
-| 8 | Geofence trigger                    | Android       | Location-boundary task firing             | 3–4 h    | P2       |
-| 9 | Activity Recognition transitions    | Android       | Motion-state task firing                  | 2–3 h    | P2       |
-|12 | Significant Location Change         | iOS           | ~500m-movement background wakeup          | 2–3 h    | P2       |
-|13 | Region Monitoring (geofence)        | iOS           | Location-boundary task firing             | 1–2 h    | P2       |
-|10 | BLE device-presence scan            | Android       | BLE advertisement wakeup                  | 2–3 h    | P2       |
-|18 | BGContinuedProcessingTask (iOS 26+) | iOS           | User-initiated long-running background    | 2–3 h    | P2       |
-| 3 | Windowed exact alarm                | Android       | Battery-friendly timing                   | 30 min   | P3       |
-|11 | ContentUri job trigger              | Android       | ContentProvider change wakeup             | 1–2 h    | P3       |
-|14 | Location Visit Monitoring           | iOS           | Arrival/departure wakeup                  | 1 h      | P3       |
-|15 | Core Bluetooth state restoration    | iOS           | BLE advertisement/connection wakeup       | 3–4 h    | P3       |
-|16 | URLSession background transfer      | iOS           | Transfer-completion wakeup                | 2–3 h    | P3       |
-|17 | HealthKit background delivery       | iOS           | Health-data-change wakeup                 | 3–4 h    | P3       |
-
-Implement #1 and #4 first — they unlock long-running task support which is the
-main gap between the current implementation and full production use.
-
-**Android 15 note:** If/when #1 (Foreground Service Worker) is implemented, add
-`onTimeout()` handling — `dataSync` FGS type is capped at 6 hours per 24h on
-Android 15; exceeding it without calling `stopSelf()` in `onTimeout()` causes an ANR.
