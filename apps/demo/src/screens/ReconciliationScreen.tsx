@@ -326,8 +326,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   advisoryText: { fontSize: 11, lineHeight: 16 },
-  filterScroll: { flexShrink: 0 },
-  filterRow: { flexDirection: 'row', paddingHorizontal: 12, gap: 8, paddingVertical: 6 },
+  filterScroll: { height: 46 },
+  filterRow: { flexDirection: 'row', paddingHorizontal: 12, gap: 8, paddingVertical: 4 },
   filterChip: {
     paddingHorizontal: 12,
     paddingVertical: 7,
