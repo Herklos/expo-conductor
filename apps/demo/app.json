@@ -3,6 +3,15 @@
     "name": "Conductor Demo",
     "slug": "expo-conductor-demo",
     "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/d259c4e5-a1f1-4e59-a558-551fa80200d7",
+      "enabled": true,
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
+    },
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,

@@ -13,6 +13,8 @@ dist/
 web-build/
 apps/*/android/
 apps/*/ios/
+*.apk
+*.ipa
 
 # native build
 **/.gradle/
