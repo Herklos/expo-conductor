@@ -34,6 +34,7 @@ interface ConductorContextValue {
   refresh: () => Promise<void>;
   refreshHistory: () => Promise<void>;
   clearHistory: () => Promise<void>;
+  clearLiveLog: () => void;
 }
 
 const ConductorContext = createContext<ConductorContextValue>({
@@ -45,6 +46,7 @@ const ConductorContext = createContext<ConductorContextValue>({
   refresh: async () => {},
   refreshHistory: async () => {},
   clearHistory: async () => {},
+  clearLiveLog: () => {},
 });
 
 export function ConductorProvider({ children }: { children: React.ReactNode }) {
@@ -75,6 +77,11 @@ export function ConductorProvider({ children }: { children: React.ReactNode }) {
     setRecords([]);
   }, []);
 
+  const clearLiveLog = useCallback(() => {
+    logRef.current = [];
+    setLiveLog([]);
+  }, []);
+
   useEffect(() => {
     const subs = [
       Conductor.addListener('onTaskExecute', (p) => {
@@ -101,7 +108,7 @@ export function ConductorProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <ConductorContext.Provider
-      value={{ tasks, records, liveLog, triggerMode, setTriggerMode, refresh, refreshHistory, clearHistory }}
+      value={{ tasks, records, liveLog, triggerMode, setTriggerMode, refresh, refreshHistory, clearHistory, clearLiveLog }}
     >
       {children}
     </ConductorContext.Provider>

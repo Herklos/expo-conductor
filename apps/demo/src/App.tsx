@@ -16,7 +16,7 @@ import { StyleSheet, View } from 'react-native';
 import { ConductorProvider } from './state/ConductorProvider';
 import { TabBar, type Tab } from './navigation/TabBar';
 import { LabScreen } from './screens/LabScreen';
-import { HistoryScreen } from './screens/HistoryScreen';
+import { LogsScreen } from './screens/LogsScreen';
 import { ReconciliationScreen } from './screens/ReconciliationScreen';
 import { LifecycleScreen } from './screens/LifecycleScreen';
 import { useTheme } from './theme';
@@ -36,8 +36,8 @@ function Shell() {
         <View style={activeTab === 'lab' ? styles.visible : styles.hidden}>
           <LabScreen />
         </View>
-        <View style={activeTab === 'history' ? styles.visible : styles.hidden}>
-          <HistoryScreen />
+        <View style={activeTab === 'logs' ? styles.visible : styles.hidden}>
+          <LogsScreen />
         </View>
         <View style={activeTab === 'reconcile' ? styles.visible : styles.hidden}>
           <ReconciliationScreen />

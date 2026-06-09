@@ -1,11 +1,9 @@
 /**
- * System & Lifecycle screen — conductor controls, EAS update info,
- * trigger-type selector, permissions, budget, headless, task registry,
- * and real-time colorised event log.
+ * System screen — conductor controls, trigger selector, permissions,
+ * resource budget, headless tick, EAS update info, and task registry.
  */
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  FlatList,
   Platform,
   Pressable,
   ScrollView,
@@ -32,27 +30,47 @@ function fmtDateTime(ms: number): string {
     `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-// ─── Primitives ──────────────────────────────────────────────────────────────
+// ─── Status dot ───────────────────────────────────────────────────────────────
 
 function StatusDot({ color }: { color: string }) {
   return <View style={[dot.d, { backgroundColor: color }]} />;
 }
 const dot = StyleSheet.create({ d: { width: 8, height: 8, borderRadius: 4 } });
 
-function SectionDivider({ title, theme }: { title: string; theme: Theme }) {
+// ─── Section header with optional description ─────────────────────────────────
+
+function Section({
+  title,
+  desc,
+  theme,
+  children,
+}: {
+  title: string;
+  desc: string;
+  theme: Theme;
+  children: React.ReactNode;
+}) {
   return (
-    <View style={divs.row}>
-      <View style={[divs.line, { backgroundColor: theme.border }]} />
-      <Text style={[divs.label, { color: theme.muted, fontFamily: MONO }]}>{title}</Text>
-      <View style={[divs.line, { backgroundColor: theme.border }]} />
+    <View style={sec.wrap}>
+      <View style={sec.header}>
+        <View style={[sec.line, { backgroundColor: theme.border }]} />
+        <Text style={[sec.title, { color: theme.muted, fontFamily: MONO }]}>{title}</Text>
+        <View style={[sec.line, { backgroundColor: theme.border }]} />
+      </View>
+      <Text style={[sec.desc, { color: theme.muted }]}>{desc}</Text>
+      {children}
     </View>
   );
 }
-const divs = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', marginVertical: 12 },
+const sec = StyleSheet.create({
+  wrap: { marginTop: 8, marginBottom: 4 },
+  header: { flexDirection: 'row', alignItems: 'center', marginBottom: 5 },
   line: { flex: 1, height: StyleSheet.hairlineWidth },
-  label: { fontSize: 9, fontWeight: '700', letterSpacing: 2, marginHorizontal: 10 },
+  title: { fontSize: 9, fontWeight: '700', letterSpacing: 2, marginHorizontal: 10 },
+  desc: { fontSize: 11, marginBottom: 10, lineHeight: 16 },
 });
+
+// ─── Outlined action button ───────────────────────────────────────────────────
 
 function Btn({
   label,
@@ -91,7 +109,7 @@ const btn = StyleSheet.create({
 const TRIGGER_MODES: { id: TriggerMode; label: string; sub: string }[] = [
   { id: 'interval',     label: 'Interval',     sub: 'WorkManager · 30 s recurring' },
   { id: 'alarm',        label: 'Exact Alarm',  sub: 'AlarmManager · precise timing' },
-  { id: 'notification', label: 'Notification', sub: 'Local notification delivery' },
+  { id: 'notification', label: 'Notification', sub: 'Local notification delivery · one-shot' },
 ];
 
 function TriggerSelector({
@@ -150,7 +168,7 @@ const ts = StyleSheet.create({
   sub: { fontSize: 10, marginTop: 1 },
 });
 
-// ─── Permission / info row ────────────────────────────────────────────────────
+// ─── Permission / status row ──────────────────────────────────────────────────
 
 function InfoRow({
   dot: dotColor,
@@ -192,21 +210,11 @@ const ir = StyleSheet.create({
   val: { fontSize: 11, marginTop: 1 },
 });
 
-// ─── Log line colour ──────────────────────────────────────────────────────────
-
-function logColor(line: string, theme: Theme): string {
-  if (line.includes('execute →')) return theme.accent;
-  if (line.includes('complete →')) return theme.success;
-  if (line.includes('error →')) return theme.danger;
-  if (line.includes('skipped →')) return theme.warning;
-  return theme.muted;
-}
-
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export function LifecycleScreen() {
   const theme = useTheme();
-  const { tasks, liveLog, refresh, triggerMode, setTriggerMode } = useConductor();
+  const { tasks, refresh, triggerMode, setTriggerMode } = useConductor();
   const [conductorStatus, setConductorStatus] = useState<string | null>(null);
   const [permGranted, setPermGranted] = useState<boolean | null>(null);
   const [opResult, setOpResult] = useState('');
@@ -234,7 +242,11 @@ export function LifecycleScreen() {
         {/* ── Page header ── */}
         <View style={[s.header, { borderBottomColor: theme.border }]}>
           <View style={s.headerRow}>
-            <StatusDot color={conductorStatus === 'restricted' ? theme.warning : conductorStatus === 'available' ? theme.success : theme.muted} />
+            <StatusDot color={
+              conductorStatus === 'available' ? theme.success
+              : conductorStatus === 'restricted' ? theme.warning
+              : theme.muted
+            } />
             <Text style={[s.headerTitle, { color: theme.text }]}>SYSTEM CONTROL</Text>
           </View>
           <Text style={[s.headerCount, { color: theme.muted, fontFamily: MONO }]}>
@@ -249,214 +261,224 @@ export function LifecycleScreen() {
           </View>
         )}
 
-        {/* ── EAS Update ── */}
-        <SectionDivider title="EAS UPDATE" theme={theme} />
-        <View style={[s.easCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <View style={s.easRow}>
-            <View style={[s.easBadge, { backgroundColor: easInfo.isEmbedded ? theme.warningBg : theme.successBg }]}>
-              <Text style={[s.easBadgeText, { color: easInfo.isEmbedded ? theme.warning : theme.success }]}>
-                {easInfo.isEmbedded ? 'EMBEDDED' : 'OTA'}
-              </Text>
-            </View>
-            {easInfo.channel && (
-              <View style={[s.easBadge, { backgroundColor: theme.accentMuted }]}>
-                <Text style={[s.easBadgeText, { color: theme.accent }]}>{easInfo.channel}</Text>
-              </View>
-            )}
-          </View>
-          <Text style={[s.easDate, { color: theme.text, fontFamily: MONO }]}>
-            {easInfo.createdAt ? fmtDateTime(easInfo.createdAt.getTime()) : '— no date available —'}
-          </Text>
-          {easInfo.updateId && (
-            <Text style={[s.easId, { color: theme.muted, fontFamily: MONO }]}>
-              ID  {easInfo.updateId.slice(0, 8)}…
-            </Text>
-          )}
-        </View>
-
         {/* ── Trigger type ── */}
-        <SectionDivider title="TRIGGER TYPE  (affects Lab)" theme={theme} />
-        <TriggerSelector value={triggerMode} onChange={setTriggerMode} theme={theme} />
+        <Section
+          title="TRIGGER TYPE"
+          desc="Controls how tasks are scheduled when you press 'Schedule active' in the Lab. Switch modes to demo WorkManager, exact-alarm, or notification-linked delivery."
+          theme={theme}
+        >
+          <TriggerSelector value={triggerMode} onChange={setTriggerMode} theme={theme} />
+        </Section>
 
         {/* ── Conductor control ── */}
-        <SectionDivider title="CONDUCTOR CONTROL" theme={theme} />
-        <View style={s.btnRow}>
-          <Btn
-            label="PAUSE"
-            color={theme.warning}
-            onPress={() => run(async () => {
-              await Conductor.pause();
-              setOpResult('conductor paused');
-            })}
-          />
-          <Btn
-            label="RESUME"
-            color={theme.success}
-            onPress={() => run(async () => {
-              await Conductor.resume();
-              await refresh();
-              setOpResult('conductor resumed');
-            })}
-          />
-          <Btn
-            label="CANCEL ALL"
-            color={theme.danger}
-            onPress={() => run(async () => {
-              const all = await Conductor.getTasks();
-              await Promise.all(all.map((t) => Conductor.cancelTask(t.id)));
-              await refresh();
-              setOpResult(`cancelled ${all.length} task(s)`);
-            })}
-          />
-        </View>
+        <Section
+          title="CONDUCTOR CONTROL"
+          desc="Pause suspends all scheduling and skips dispatch even for incoming triggers. Resume re-arms every registered task."
+          theme={theme}
+        >
+          <View style={s.btnRow}>
+            <Btn
+              label="PAUSE"
+              color={theme.warning}
+              onPress={() => run(async () => {
+                await Conductor.pause();
+                setOpResult('conductor paused');
+              })}
+            />
+            <Btn
+              label="RESUME"
+              color={theme.success}
+              onPress={() => run(async () => {
+                await Conductor.resume();
+                await refresh();
+                setOpResult('conductor resumed');
+              })}
+            />
+            <Btn
+              label="CANCEL ALL"
+              color={theme.danger}
+              onPress={() => run(async () => {
+                const all = await Conductor.getTasks();
+                await Promise.all(all.map((t) => Conductor.cancelTask(t.id)));
+                await refresh();
+                setOpResult(`cancelled ${all.length} task(s)`);
+              })}
+            />
+          </View>
+        </Section>
 
         {/* ── Permissions ── */}
-        <SectionDivider title="PERMISSIONS" theme={theme} />
-        <InfoRow
-          dot={permGranted === true ? theme.success : permGranted === false ? theme.danger : theme.muted}
-          label="POST_NOTIFICATIONS"
-          value={permGranted === true ? 'granted' : permGranted === false ? 'denied' : 'not checked'}
-          action={{
-            label: 'REQUEST',
-            onPress: () => run(async () => {
-              const granted = await Conductor.requestPermissions();
-              setPermGranted(granted);
-              setOpResult(`notifications: ${granted ? 'granted' : 'denied'}`);
-            }),
-          }}
+        <Section
+          title="PERMISSIONS"
+          desc="POST_NOTIFICATIONS is required on Android 13+ for notification triggers and headless-tick alerts. Conductor status reflects OS background restrictions."
           theme={theme}
-        />
-        <InfoRow
-          dot={conductorStatus === 'available' ? theme.success : conductorStatus === 'restricted' ? theme.warning : theme.muted}
-          label="CONDUCTOR STATUS"
-          value={conductorStatus ?? 'not checked'}
-          action={{
-            label: 'CHECK',
-            onPress: () => run(async () => {
-              const st = await Conductor.getStatus();
-              setConductorStatus(st);
-              setOpResult(`status: ${st}`);
-            }),
-          }}
-          theme={theme}
-        />
+        >
+          <InfoRow
+            dot={permGranted === true ? theme.success : permGranted === false ? theme.danger : theme.muted}
+            label="POST_NOTIFICATIONS"
+            value={permGranted === true ? 'granted' : permGranted === false ? 'denied' : 'not checked'}
+            action={{
+              label: 'REQUEST',
+              onPress: () => run(async () => {
+                const granted = await Conductor.requestPermissions();
+                setPermGranted(granted);
+                setOpResult(`notifications: ${granted ? 'granted' : 'denied'}`);
+              }),
+            }}
+            theme={theme}
+          />
+          <InfoRow
+            dot={conductorStatus === 'available' ? theme.success : conductorStatus === 'restricted' ? theme.warning : theme.muted}
+            label="CONDUCTOR STATUS"
+            value={conductorStatus ?? 'not checked'}
+            action={{
+              label: 'CHECK',
+              onPress: () => run(async () => {
+                const st = await Conductor.getStatus();
+                setConductorStatus(st);
+                setOpResult(`status: ${st}`);
+              }),
+            }}
+            theme={theme}
+          />
+        </Section>
 
         {/* ── Resource budget ── */}
-        <SectionDivider title="RESOURCE BUDGET" theme={theme} />
-        <View style={s.btnRow}>
-          <Btn
-            label="CPU 0.5"
-            color={theme.accent}
-            onPress={() => run(async () => {
-              await Conductor.setResourceBudget({ cpu: 0.5, network: 1, battery: 1, memory: 1 });
-              setOpResult('budget → cpu=0.5');
-            })}
-          />
-          <Btn
-            label="NET 0.5"
-            color={theme.accent}
-            onPress={() => run(async () => {
-              await Conductor.setResourceBudget({ cpu: 1, network: 0.5, battery: 1, memory: 1 });
-              setOpResult('budget → network=0.5');
-            })}
-          />
-          <Btn
-            label="RESET"
-            color={theme.success}
-            fill
-            onPress={() => run(async () => {
-              await Conductor.setResourceBudget({ cpu: 1, network: 1, battery: 1, memory: 1 });
-              setOpResult('budget reset to 1.0');
-            })}
-          />
-        </View>
+        <Section
+          title="RESOURCE BUDGET"
+          desc="Caps how much of each resource class (CPU, network, battery, memory) the conductor may allocate across all concurrently running tasks. Values are fractions of 1.0."
+          theme={theme}
+        >
+          <View style={s.btnRow}>
+            <Btn
+              label="CPU 0.5"
+              color={theme.accent}
+              onPress={() => run(async () => {
+                await Conductor.setResourceBudget({ cpu: 0.5, network: 1, battery: 1, memory: 1 });
+                setOpResult('budget → cpu=0.5');
+              })}
+            />
+            <Btn
+              label="NET 0.5"
+              color={theme.accent}
+              onPress={() => run(async () => {
+                await Conductor.setResourceBudget({ cpu: 1, network: 0.5, battery: 1, memory: 1 });
+                setOpResult('budget → network=0.5');
+              })}
+            />
+            <Btn
+              label="RESET"
+              color={theme.success}
+              fill
+              onPress={() => run(async () => {
+                await Conductor.setResourceBudget({ cpu: 1, network: 1, battery: 1, memory: 1 });
+                setOpResult('budget reset to 1.0');
+              })}
+            />
+          </View>
+        </Section>
 
         {/* ── Headless tick ── */}
-        <SectionDivider title="HEADLESS TICK" theme={theme} />
-        <View style={s.btnRow}>
-          <Btn
-            label="ENABLE 15m"
-            color={theme.accent}
-            onPress={() => run(async () => {
-              const r = await enableHeadlessBackground(15);
-              setOpResult(r);
-            })}
-          />
-          <Btn
-            label="STATUS"
-            color={theme.accent}
-            onPress={() => run(async () => {
-              const r = await backgroundTaskStatus();
-              setOpResult(r);
-            })}
-          />
-          <Btn
-            label="DISABLE"
-            color={theme.danger}
-            onPress={() => run(async () => {
-              const r = await disableHeadlessBackground();
-              setOpResult(r);
-            })}
-          />
-        </View>
+        <Section
+          title="HEADLESS TICK"
+          desc="Registers an expo-background-task periodic tick so JS handlers can run after the app is terminated. Requires expo-task-manager + expo-background-task optional deps."
+          theme={theme}
+        >
+          <View style={s.btnRow}>
+            <Btn
+              label="ENABLE 15m"
+              color={theme.accent}
+              onPress={() => run(async () => {
+                const r = await enableHeadlessBackground(15);
+                setOpResult(r);
+              })}
+            />
+            <Btn
+              label="STATUS"
+              color={theme.accent}
+              onPress={() => run(async () => {
+                const r = await backgroundTaskStatus();
+                setOpResult(r);
+              })}
+            />
+            <Btn
+              label="DISABLE"
+              color={theme.danger}
+              onPress={() => run(async () => {
+                const r = await disableHeadlessBackground();
+                setOpResult(r);
+              })}
+            />
+          </View>
+        </Section>
 
-        {/* ── Registered tasks ── */}
-        <SectionDivider title={`REGISTERED TASKS  (${tasks.length})`} theme={theme} />
-        {tasks.length === 0 ? (
-          <Text style={[s.empty, { color: theme.muted, fontFamily: MONO }]}>— no tasks registered —</Text>
-        ) : (
-          <View style={[s.table, { borderColor: theme.border }]}>
-            {/* header */}
-            <View style={[s.tHead, { borderBottomColor: theme.border, backgroundColor: theme.card }]}>
-              <Text style={[s.thId, { color: theme.muted }]}>TASK ID</Text>
-              <Text style={[s.thPri, { color: theme.muted }]}>PRI</Text>
-              <Text style={[s.thDate, { color: theme.muted }]}>NEXT RUN</Text>
-            </View>
-            {tasks.map((t, idx) => (
-              <View
-                key={t.id}
-                style={[
-                  s.tRow,
-                  { borderBottomColor: theme.border },
-                  idx % 2 === 0 ? {} : { backgroundColor: theme.card + '80' },
-                ]}
-              >
-                <Text style={[s.tdId, { color: theme.text, fontFamily: MONO }]} numberOfLines={1}>{t.id}</Text>
-                <Text style={[s.tdPri, { color: theme.accent, fontFamily: MONO }]}>p{t.priority}</Text>
-                <Text style={[s.tdDate, { color: theme.muted, fontFamily: MONO }]}>
-                  {t.nextRunAt ? fmtDateTime(t.nextRunAt) : '—'}
+        {/* ── EAS Update ── */}
+        <Section
+          title="EAS UPDATE"
+          desc="Identifies the currently running bundle. 'Embedded' means the original build APK/IPA; 'OTA' means a live update was applied at launch via expo-updates."
+          theme={theme}
+        >
+          <View style={[s.easCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <View style={s.easRow}>
+              <View style={[s.easBadge, { backgroundColor: easInfo.isEmbedded ? theme.warningBg : theme.successBg }]}>
+                <Text style={[s.easBadgeText, { color: easInfo.isEmbedded ? theme.warning : theme.success }]}>
+                  {easInfo.isEmbedded ? 'EMBEDDED' : 'OTA'}
                 </Text>
               </View>
-            ))}
+              {easInfo.channel && (
+                <View style={[s.easBadge, { backgroundColor: theme.accentMuted }]}>
+                  <Text style={[s.easBadgeText, { color: theme.accent }]}>{easInfo.channel}</Text>
+                </View>
+              )}
+            </View>
+            <Text style={[s.easDate, { color: theme.text, fontFamily: MONO }]}>
+              {easInfo.createdAt ? fmtDateTime(easInfo.createdAt.getTime()) : '— no date available —'}
+            </Text>
+            {easInfo.updateId && (
+              <Text style={[s.easId, { color: theme.muted, fontFamily: MONO }]}>
+                ID  {easInfo.updateId.slice(0, 8)}…
+              </Text>
+            )}
           </View>
-        )}
+        </Section>
 
-        <View style={{ height: 20 }} />
-      </ScrollView>
-
-      {/* ── Event log (terminal panel) ── */}
-      <View style={[s.logWrap, { backgroundColor: theme.card, borderTopColor: theme.border }]}>
-        {/* Terminal chrome */}
-        <View style={[s.logChrome, { borderBottomColor: theme.border }]}>
-          <View style={s.trafficLights}>
-            <View style={[s.tl, { backgroundColor: theme.danger }]} />
-            <View style={[s.tl, { backgroundColor: theme.warning }]} />
-            <View style={[s.tl, { backgroundColor: theme.success }]} />
-          </View>
-          <Text style={[s.logTitle, { color: theme.muted, fontFamily: MONO }]}>
-            EVENT LOG  ·  {liveLog.length} entries
-          </Text>
-        </View>
-        <FlatList
-          data={liveLog}
-          keyExtractor={(_, i) => String(i)}
-          renderItem={({ item }) => (
-            <Text style={[s.logLine, { color: logColor(item, theme), fontFamily: MONO }]}>{item}</Text>
+        {/* ── Registered tasks ── */}
+        <Section
+          title={`REGISTERED TASKS  (${tasks.length})`}
+          desc="All tasks currently stored by the conductor. 'Next run' is the computed next trigger time; '—' means the task has no future scheduled occurrence."
+          theme={theme}
+        >
+          {tasks.length === 0 ? (
+            <Text style={[s.empty, { color: theme.muted, fontFamily: MONO }]}>— no tasks registered —</Text>
+          ) : (
+            <View style={[s.table, { borderColor: theme.border }]}>
+              <View style={[s.tHead, { borderBottomColor: theme.border, backgroundColor: theme.card }]}>
+                <Text style={[s.thId, { color: theme.muted }]}>TASK ID</Text>
+                <Text style={[s.thPri, { color: theme.muted }]}>PRI</Text>
+                <Text style={[s.thDate, { color: theme.muted }]}>NEXT RUN</Text>
+              </View>
+              {tasks.map((t, idx) => (
+                <View
+                  key={t.id}
+                  style={[
+                    s.tRow,
+                    { borderBottomColor: theme.border },
+                    idx % 2 !== 0 && { backgroundColor: theme.card + '80' },
+                  ]}
+                >
+                  <Text style={[s.tdId, { color: theme.text, fontFamily: MONO }]} numberOfLines={1}>{t.id}</Text>
+                  <Text style={[s.tdPri, { color: theme.accent, fontFamily: MONO }]}>p{t.priority}</Text>
+                  <Text style={[s.tdDate, { color: theme.muted, fontFamily: MONO }]}>
+                    {t.nextRunAt ? fmtDateTime(t.nextRunAt) : '—'}
+                  </Text>
+                </View>
+              ))}
+            </View>
           )}
-          style={s.logList}
-          nestedScrollEnabled
-        />
-      </View>
+        </Section>
+
+        <View style={{ height: 24 }} />
+      </ScrollView>
     </View>
   );
 }
@@ -488,6 +510,8 @@ const s = StyleSheet.create({
   },
   bannerText: { fontSize: 12 },
 
+  btnRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+
   easCard: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 10,
@@ -495,17 +519,10 @@ const s = StyleSheet.create({
     gap: 6,
   },
   easRow: { flexDirection: 'row', gap: 6 },
-  easBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 5,
-    alignSelf: 'flex-start',
-  },
+  easBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 5, alignSelf: 'flex-start' },
   easBadgeText: { fontSize: 10, fontWeight: '800', letterSpacing: 1 },
   easDate: { fontSize: 14, fontWeight: '600' },
   easId: { fontSize: 11 },
-
-  btnRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
 
   empty: { fontSize: 12, textAlign: 'center', paddingVertical: 10 },
   table: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 8, overflow: 'hidden' },
@@ -522,19 +539,4 @@ const s = StyleSheet.create({
   tdId: { flex: 3, fontSize: 11 },
   tdPri: { width: 36, fontSize: 11, textAlign: 'center' },
   tdDate: { flex: 3, fontSize: 10, textAlign: 'right' },
-
-  logWrap: { height: 200, borderTopWidth: StyleSheet.hairlineWidth },
-  logChrome: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  trafficLights: { flexDirection: 'row', gap: 5 },
-  tl: { width: 11, height: 11, borderRadius: 6 },
-  logTitle: { fontSize: 10, fontWeight: '700', letterSpacing: 1.5 },
-  logList: { flex: 1 },
-  logLine: { fontSize: 11, paddingHorizontal: 12, paddingVertical: 2, lineHeight: 17 },
 });

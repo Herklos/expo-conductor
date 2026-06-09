@@ -2,11 +2,11 @@ import React from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { Theme } from '../theme';
 
-export type Tab = 'lab' | 'history' | 'reconcile' | 'lifecycle';
+export type Tab = 'lab' | 'logs' | 'reconcile' | 'lifecycle';
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'lab', label: 'Lab', icon: '⚗️' },
-  { id: 'history', label: 'History', icon: '📜' },
+  { id: 'logs', label: 'Logs', icon: '📋' },
   { id: 'reconcile', label: 'Reconcile', icon: '🔍' },
   { id: 'lifecycle', label: 'System', icon: '⚙️' },
 ];
