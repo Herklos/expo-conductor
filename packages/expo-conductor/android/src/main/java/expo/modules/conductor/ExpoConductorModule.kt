@@ -167,18 +167,11 @@ class ExpoConductorModule : Module() {
         perms,
         object : Promise {
           override fun resolve(value: Any?) {
-            @Suppress("UNCHECKED_CAST")
-            val granted = when (val v = value) {
-              is Boolean -> v
-              // expo-modules-core resolves with Bundle{permName -> Bundle{granted, status, ...}}
-              is android.os.Bundle ->
-                v.getBundle(android.Manifest.permission.POST_NOTIFICATIONS)
-                  ?.getBoolean("granted") == true
-              is Map<*, *> ->
-                v["granted"] == true ||
-                  v.values.any { inner -> (inner as? Map<*, *>)?.get("granted") == true }
-              else -> false
-            }
+            // The dialog has been dismissed — query actual OS state rather than
+            // parsing the Bundle, whose structure varies across expo-modules-core versions.
+            val granted = context.checkSelfPermission(
+              android.Manifest.permission.POST_NOTIFICATIONS
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
             promise.resolve(granted)
           }
           override fun reject(code: String?, message: String?, cause: Throwable?) =
