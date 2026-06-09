@@ -9,8 +9,9 @@
  * active cells as recurring tasks (30s interval for demo purposes). "Cancel lab"
  * cancels every task whose ID starts with "lab-".
  */
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Platform,
   Pressable,
   ScrollView,
@@ -96,6 +97,9 @@ export function LabScreen() {
   const theme = useTheme();
   const { tasks, refresh } = useConductor();
   const [status, setStatus] = useState('');
+  const [runningTasks, setRunningTasks] = useState<Record<string, boolean>>({});
+  const [lastDurations, setLastDurations] = useState<Record<string, number>>({});
+  const startTimesRef = useRef<Record<string, number>>({});
 
   const nativeLabel =
     Platform.OS === 'android' ? 'Kotlin' : Platform.OS === 'ios' ? 'Swift' : 'Native';
@@ -205,6 +209,37 @@ export function LabScreen() {
     setStatus(`🗑 Cancelled ${lab.length} lab task${lab.length !== 1 ? 's' : ''}`);
   }, [refresh]);
 
+  // ---------------------------------------------------------------------------
+  // Run-now: fire a scheduled task immediately, track duration
+  // ---------------------------------------------------------------------------
+
+  useEffect(() => {
+    const done = (p: { taskId: string }, trackDuration: boolean) => {
+      if (!(p.taskId in startTimesRef.current)) return;
+      const dur = trackDuration ? Date.now() - startTimesRef.current[p.taskId] : undefined;
+      delete startTimesRef.current[p.taskId];
+      setRunningTasks((prev) => ({ ...prev, [p.taskId]: false }));
+      if (dur != null) setLastDurations((prev) => ({ ...prev, [p.taskId]: dur }));
+    };
+    const s1 = Conductor.addListener('onTaskComplete', (p) => done(p, true));
+    const s2 = Conductor.addListener('onTaskError', (p) => done(p, true));
+    const s3 = Conductor.addListener('onTaskSkipped', (p) => done(p, false));
+    return () => { s1.remove(); s2.remove(); s3.remove(); };
+  }, []);
+
+  const handleRunNow = useCallback(async (taskId: string) => {
+    if (taskId in startTimesRef.current) return;
+    startTimesRef.current[taskId] = Date.now();
+    setRunningTasks((prev) => ({ ...prev, [taskId]: true }));
+    try {
+      await Conductor.runNow(taskId);
+    } catch (e) {
+      delete startTimesRef.current[taskId];
+      setRunningTasks((prev) => ({ ...prev, [taskId]: false }));
+      setStatus('⚠ ' + (e instanceof Error ? e.message : 'Run failed'));
+    }
+  }, []);
+
   const activeLabIds = useMemo(
     () => new Set(tasks.filter((t) => t.id.startsWith('lab-')).map((t) => t.id)),
     [tasks],
@@ -298,6 +333,40 @@ export function LabScreen() {
               );
             })}
           </View>
+
+          {/* Run-now row — visible when at least one lang cell is scheduled */}
+          {LANGS.some((l) => activeLabIds.has(resolveTask(archetype, l).taskId)) && (
+            <View style={styles.runRow}>
+              <View style={styles.archetypeLabel} />
+              {LANGS.map((lang) => {
+                const { taskId } = resolveTask(archetype, lang);
+                const isScheduled = activeLabIds.has(taskId);
+                const isRunning = runningTasks[taskId] ?? false;
+                const dur = lastDurations[taskId];
+                return (
+                  <View key={lang.id} style={styles.runCell}>
+                    {isScheduled && (
+                      isRunning ? (
+                        <ActivityIndicator size="small" color={lang.color} />
+                      ) : (
+                        <Pressable
+                          style={[styles.runBtn, { borderColor: lang.color }]}
+                          onPress={() => handleRunNow(taskId)}
+                        >
+                          <Text style={[styles.runBtnText, { color: lang.color }]}>▶</Text>
+                        </Pressable>
+                      )
+                    )}
+                    {dur != null && !isRunning && (
+                      <Text style={[styles.durationText, { color: theme.muted }]}>
+                        {dur < 1000 ? `${dur}ms` : `${(dur / 1000).toFixed(1)}s`}
+                      </Text>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+          )}
 
           {/* Per-cell settings (one expanded at a time) */}
           {LANGS.map((lang) => {
@@ -539,4 +608,10 @@ const styles = StyleSheet.create({
     marginVertical: 4,
   },
   switchLabel: { fontSize: 13 },
+
+  runRow: { flexDirection: 'row', marginTop: 6, alignItems: 'center' },
+  runCell: { flex: 1, alignItems: 'center', gap: 2 },
+  runBtn: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1 },
+  runBtnText: { fontSize: 11, fontWeight: '700' },
+  durationText: { fontSize: 10, textAlign: 'center' },
 });
