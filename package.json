@@ -4,6 +4,7 @@
   "description": "Monorepo for expo-conductor: a task orchestration Expo native module, plus a demo app.",
   "license": "MIT",
   "scripts": {
+    "prepare": "pnpm --filter expo-conductor build",
     "build": "pnpm --filter expo-conductor build",
     "test": "pnpm --filter expo-conductor test",
     "test:kotlin": "cd packages/expo-conductor/android/engine-jvm && gradle test --console=plain",
