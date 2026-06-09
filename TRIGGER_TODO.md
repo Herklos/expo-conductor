@@ -212,7 +212,7 @@ interface AlarmTrigger {
 **Constraints:** `BLUETOOTH_SCAN` runtime permission (Android 12+); no-op when Bluetooth is off.
 
 **Effort:** ~2–3 h  
-**Priority:** P3
+**Priority:** P2
 
 ---
 
@@ -566,9 +566,9 @@ iOS — `ConductorAppDelegate.swift` (NotificationDelegate path)
 | 9 | Activity Recognition transitions    | Android       | Motion-state task firing                  | 2–3 h    | P2       |
 |12 | Significant Location Change         | iOS           | ~500m-movement background wakeup          | 2–3 h    | P2       |
 |13 | Region Monitoring (geofence)        | iOS           | Location-boundary task firing             | 1–2 h    | P2       |
+|10 | BLE device-presence scan            | Android       | BLE advertisement wakeup                  | 2–3 h    | P2       |
 |18 | BGContinuedProcessingTask (iOS 26+) | iOS           | User-initiated long-running background    | 2–3 h    | P2       |
 | 3 | Windowed exact alarm                | Android       | Battery-friendly timing                   | 30 min   | P3       |
-|10 | BLE device-presence scan            | Android       | BLE advertisement wakeup                  | 2–3 h    | P3       |
 |11 | ContentUri job trigger              | Android       | ContentProvider change wakeup             | 1–2 h    | P3       |
 |14 | Location Visit Monitoring           | iOS           | Arrival/departure wakeup                  | 1 h      | P3       |
 |15 | Core Bluetooth state restoration    | iOS           | BLE advertisement/connection wakeup       | 3–4 h    | P3       |
