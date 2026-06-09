@@ -60,8 +60,16 @@ export interface ConductorPluginOptions {
    */
   rustLibName?: string;
   /** Extra iOS BGTaskScheduler identifiers to permit. The module's own
-   *  `software.drakkar.expoconductor.refresh` identifier is always included. */
+   *  `software.drakkar.expoconductor.refresh` and `...processing` identifiers are always
+   *  included. */
   backgroundTaskIdentifiers?: string[];
+  /**
+   * Android only. Inject `FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_DATA_SYNC`
+   * permissions so tasks with `policy.foreground: true` can promote the WorkManager
+   * worker to a foreground service (Doze-safe, no 10-minute background CPU cap).
+   * Default `false`. Has no effect on iOS or Web.
+   */
+  enableForegroundService?: boolean;
 }
 
 const ANDROID_PERMISSIONS = [
@@ -75,7 +83,10 @@ const SCHEDULE_EXACT_ALARM = 'android.permission.SCHEDULE_EXACT_ALARM';
 // The non-revocable variant (API 33+) — Play-restricted to alarm-clock/calendar apps, opt-in.
 const USE_EXACT_ALARM = 'android.permission.USE_EXACT_ALARM';
 
-const DEFAULT_BG_IDENTIFIERS = ['software.drakkar.expoconductor.refresh'];
+const DEFAULT_BG_IDENTIFIERS = [
+  'software.drakkar.expoconductor.refresh',
+  'software.drakkar.expoconductor.processing',
+];
 
 const withConductorAndroid: ConfigPlugin<ConductorPluginOptions> = (config, options) => {
   // Permissions. SCHEDULE_EXACT_ALARM ships by default (revocable, safe); USE_EXACT_ALARM is
@@ -120,6 +131,14 @@ const withConductorAndroid: ConfigPlugin<ConductorPluginOptions> = (config, opti
     return cfg;
   });
 
+  // FOREGROUND_SERVICE permissions: required when any task uses `policy.foreground: true`.
+  if (options.enableForegroundService) {
+    config = AndroidConfig.Permissions.withPermissions(config, [
+      'android.permission.FOREGROUND_SERVICE',
+      'android.permission.FOREGROUND_SERVICE_DATA_SYNC',
+    ]);
+  }
+
   // The ConductorAlarmReceiver / BootReceiver are declared in the library's own
   // AndroidManifest.xml (so they work without the plugin and aren't duplicated by the
   // manifest merger). Only the optional FCM service is added here, when enabled.
@@ -146,9 +165,8 @@ const withConductorAndroid: ConfigPlugin<ConductorPluginOptions> = (config, opti
 const withConductorIos: ConfigPlugin<ConductorPluginOptions> = (config, options) => {
   return withInfoPlist(config, (cfg) => {
     const modes = new Set<string>((cfg.modResults.UIBackgroundModes as string[]) ?? []);
-    // Only 'fetch' is needed: the module submits BGAppRefreshTaskRequest. ('processing'
-    // would only be required for BGProcessingTaskRequest, which is not used.)
-    modes.add('fetch');
+    modes.add('fetch');       // BGAppRefreshTask
+    modes.add('processing');  // BGProcessingTask (tasks with bgProcessing: true)
     if (options.enableFcm || options.enablePush) modes.add('remote-notification');
     cfg.modResults.UIBackgroundModes = Array.from(modes);
 

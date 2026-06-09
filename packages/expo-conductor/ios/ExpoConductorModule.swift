@@ -263,6 +263,13 @@ public class ExpoConductorModule: Module {
     let triggers = (task["triggers"] as? [[String: Any]]) ?? []
     if let visible = NotificationPolicy.visibleNotificationTrigger(triggers) {
       NotificationScheduler.schedule(id: id, fireAtMs: next, title: visible["title"] as? String, body: visible["body"] as? String)
+    } else if hasBgProcessingTrigger(task) {
+      let t = backgroundTrigger(task)
+      BackgroundScheduler.scheduleProcessing(
+        earliestMs: next,
+        requiresNetwork: t?["requiresNetwork"] as? Bool ?? false,
+        requiresCharging: t?["requiresCharging"] as? Bool ?? false
+      )
     } else {
       BackgroundScheduler.scheduleRefresh(earliestMs: next)
     }
@@ -306,7 +313,16 @@ public class ExpoConductorModule: Module {
       // Prefer an explicit next-run; otherwise honor the background trigger's advisory
       // minimum interval (the OS still decides actual timing).
       let earliest = nextRunAt ?? minimumIntervalEarliestMs(task)
-      BackgroundScheduler.scheduleRefresh(earliestMs: earliest)
+      if Self.hasBgProcessingTrigger(task) {
+        let t = Self.backgroundTrigger(task)
+        BackgroundScheduler.scheduleProcessing(
+          earliestMs: earliest,
+          requiresNetwork: t?["requiresNetwork"] as? Bool ?? false,
+          requiresCharging: t?["requiresCharging"] as? Bool ?? false
+        )
+      } else {
+        BackgroundScheduler.scheduleRefresh(earliestMs: earliest)
+      }
     }
   }
 
@@ -323,6 +339,16 @@ public class ExpoConductorModule: Module {
 
   private func hasBackgroundTrigger(_ task: [String: Any]) -> Bool {
     (task["triggers"] as? [[String: Any]])?.contains { ($0["type"] as? String) == "background" } ?? false
+  }
+
+  private static func hasBgProcessingTrigger(_ task: [String: Any]) -> Bool {
+    (task["triggers"] as? [[String: Any]])?.contains {
+      ($0["type"] as? String) == "background" && ($0["bgProcessing"] as? Bool ?? false)
+    } ?? false
+  }
+
+  private static func backgroundTrigger(_ task: [String: Any]) -> [String: Any]? {
+    (task["triggers"] as? [[String: Any]])?.first { ($0["type"] as? String) == "background" }
   }
 
   // MARK: - dispatch

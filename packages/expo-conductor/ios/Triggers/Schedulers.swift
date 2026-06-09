@@ -34,19 +34,30 @@ enum NotificationScheduler {
 /// this) and `registerLaunchHandlers(_:)` must run during app launch (done by
 /// `ConductorAppDelegate`).
 enum BackgroundScheduler {
-  static let refreshIdentifier = "software.drakkar.expoconductor.refresh"
+  static let refreshIdentifier    = "software.drakkar.expoconductor.refresh"
+  static let processingIdentifier = "software.drakkar.expoconductor.processing"
   private static var registered = false
 
-  /// Register the BGTask launch handler. Must be called before the app finishes
-  /// launching (BGTaskScheduler requirement). The handler runs `onLaunch`, completes the
+  /// Register both BGTask launch handlers. Must be called before the app finishes
+  /// launching (BGTaskScheduler requirement). Each handler runs `onLaunch`, completes the
   /// task, and re-submits the next request (BGTasks are one-shot).
   static func registerLaunchHandlers(_ onLaunch: @escaping () -> Void) {
     #if canImport(BackgroundTasks)
     guard !registered else { return }
     registered = true
+
+    // BGAppRefreshTask — short background window (~30 s).
     BGTaskScheduler.shared.register(forTaskWithIdentifier: refreshIdentifier, using: nil) { task in
       // Re-arm before doing work so the cadence continues even if work is cut short.
       scheduleRefresh(earliestMs: nil)
+      task.expirationHandler = { task.setTaskCompleted(success: false) }
+      onLaunch()
+      task.setTaskCompleted(success: true)
+    }
+
+    // BGProcessingTask — long background window (~30 min CPU + network).
+    BGTaskScheduler.shared.register(forTaskWithIdentifier: processingIdentifier, using: nil) { task in
+      scheduleProcessing(earliestMs: nil, requiresNetwork: false, requiresCharging: false)
       task.expirationHandler = { task.setTaskCompleted(success: false) }
       onLaunch()
       task.setTaskCompleted(success: true)
@@ -70,11 +81,30 @@ enum BackgroundScheduler {
     #endif
   }
 
-  /// Cancel any pending background-refresh request (used by pauseAsync so a background wake
+  /// Submit a BGProcessingTaskRequest for tasks that declare `bgProcessing: true`.
+  /// BGProcessingTask allows ~30 min of CPU + network — suitable for heavy sync work.
+  static func scheduleProcessing(earliestMs: Int?, requiresNetwork: Bool, requiresCharging: Bool) {
+    #if canImport(BackgroundTasks)
+    let request = BGProcessingTaskRequest(identifier: processingIdentifier)
+    if let earliestMs = earliestMs {
+      request.earliestBeginDate = Date(timeIntervalSince1970: Double(earliestMs) / 1000.0)
+    }
+    request.requiresNetworkConnectivity = requiresNetwork
+    request.requiresExternalPower = requiresCharging
+    do {
+      try BGTaskScheduler.shared.submit(request)
+    } catch {
+      NSLog("[expo-conductor] BGTaskScheduler.submit(processing) failed: \(error.localizedDescription)")
+    }
+    #endif
+  }
+
+  /// Cancel any pending background requests (used by pauseAsync so a background wake
   /// can't run work while paused). resumeAsync re-submits via the normal schedule path.
   static func cancel() {
     #if canImport(BackgroundTasks)
     BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: refreshIdentifier)
+    BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: processingIdentifier)
     #endif
   }
 }

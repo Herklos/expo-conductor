@@ -20,9 +20,9 @@ import {
   Text,
   View,
 } from 'react-native';
-import Conductor, { Priority, type WeightPreset } from 'expo-conductor';
+import Conductor, { Priority, type Recurrence, type WeightPreset } from 'expo-conductor';
 import { useTheme } from '../theme';
-import { useConductor } from '../state/ConductorProvider';
+import { useConductor, type ScheduleConfig } from '../state/ConductorProvider';
 import { Card } from '../components/Card';
 
 // ---------------------------------------------------------------------------
@@ -65,6 +65,7 @@ interface CellSettings {
   weight: WeightPreset;
   requiresCharging: boolean;
   requiresNetwork: boolean;
+  notifyOnRun: boolean;
   expanded: boolean;
 }
 
@@ -74,6 +75,7 @@ const defaultCell = (weight: WeightPreset): CellSettings => ({
   weight,
   requiresCharging: false,
   requiresNetwork: false,
+  notifyOnRun: false,
   expanded: false,
 });
 
@@ -89,13 +91,22 @@ const PRIORITY_OPTIONS: { label: string; value: number }[] = [
 
 const WEIGHT_OPTIONS: WeightPreset[] = ['light', 'moderate', 'heavy'];
 
+function buildRecurrence(cfg: ScheduleConfig): Recurrence {
+  switch (cfg.kind) {
+    case 'daily':   return { kind: 'daily', hour: cfg.hour, minute: cfg.minute };
+    case 'weekly':  return { kind: 'weekly', weekday: cfg.weekday, hour: cfg.hour, minute: cfg.minute };
+    case 'cron':    return { kind: 'cron', expression: cfg.cron };
+    default:        return { kind: 'interval', everyMs: cfg.everyMs };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 export function LabScreen() {
   const theme = useTheme();
-  const { tasks, refresh, triggerMode } = useConductor();
+  const { tasks, refresh, triggerMode, scheduleConfig } = useConductor();
   const [status, setStatus] = useState('');
   const [runningTasks, setRunningTasks] = useState<Record<string, boolean>>({});
   const [lastDurations, setLastDurations] = useState<Record<string, number>>({});
@@ -165,11 +176,16 @@ export function LabScreen() {
   // Schedule / cancel
   // ---------------------------------------------------------------------------
 
-  const buildTriggers = useCallback((taskId: string) => {
+  const buildTriggers = useCallback((taskId: string, notifyOnRun: boolean) => {
+    const recurrence = buildRecurrence(scheduleConfig);
+    const notifTrigger = notifyOnRun
+      ? [{ type: 'notification' as const, title: 'Lab Task', body: taskId, inSeconds: Math.max(10, Math.round((scheduleConfig.everyMs ?? 30_000) / 1000)), runInBackground: true }]
+      : [];
     if (triggerMode === 'alarm') {
       return [
         { type: 'alarm' as const, at: Date.now() + 5_000, allowWhileIdle: true },
-        { type: 'recurrence' as const, recurrence: { kind: 'interval' as const, everyMs: 30_000 } },
+        { type: 'recurrence' as const, recurrence },
+        ...notifTrigger,
       ];
     }
     if (triggerMode === 'notification') {
@@ -178,9 +194,10 @@ export function LabScreen() {
       ];
     }
     return [
-      { type: 'recurrence' as const, recurrence: { kind: 'interval' as const, everyMs: 30_000 } },
+      { type: 'recurrence' as const, recurrence },
+      ...notifTrigger,
     ];
-  }, [triggerMode]);
+  }, [triggerMode, scheduleConfig]);
 
   const scheduleActive = useCallback(async () => {
     setStatus('Scheduling…');
@@ -201,7 +218,7 @@ export function LabScreen() {
           await Conductor.schedule({
             id: taskId,
             handler: { name: handlerName, type: handlerType },
-            triggers: buildTriggers(taskId),
+            triggers: buildTriggers(taskId, cell.notifyOnRun),
             priority: cell.priority,
             weight: cell.weight,
             policy: {
@@ -559,6 +576,14 @@ function CellSettings({ langLabel, langColor, cell, onChange, theme }: CellSetti
         <Switch
           value={cell.requiresNetwork}
           onValueChange={(v) => onChange({ requiresNetwork: v })}
+          trackColor={{ true: theme.accent, false: theme.border }}
+        />
+      </View>
+      <View style={styles.switchRow}>
+        <Text style={[styles.switchLabel, { color: theme.text }]}>Notify on run</Text>
+        <Switch
+          value={cell.notifyOnRun}
+          onValueChange={(v) => onChange({ notifyOnRun: v })}
           trackColor={{ true: theme.accent, false: theme.border }}
         />
       </View>

@@ -108,6 +108,16 @@ export interface BackgroundTaskTrigger {
    * decides actual timing.
    */
   minimumIntervalMinutes?: number;
+  /**
+   * iOS only. Use `BGProcessingTask` (~30 min CPU + network window) instead of
+   * `BGAppRefreshTask` (~30 s). Requires the config plugin's `processing` background
+   * mode, which is now always included. Ignored on Android and Web.
+   */
+  bgProcessing?: boolean;
+  /** BGProcessingTask only (iOS). Request network connectivity at wake time. */
+  requiresNetwork?: boolean;
+  /** BGProcessingTask only (iOS). Request an external power source at wake time. */
+  requiresCharging?: boolean;
 }
 
 /** Fire on an app lifecycle transition. */
@@ -182,6 +192,14 @@ export interface ExecutionPolicy {
    * Web engine and within a live native process; see the README for headless caveats.
    */
   maxConcurrent?: number;
+  /**
+   * Android only. Promote the WorkManager worker to a foreground service so the task
+   * survives Doze mode and is not subject to the 10-minute background CPU limit.
+   * Requires `enableForegroundService: true` in the config plugin (injects
+   * `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_DATA_SYNC` permissions). Default `false`.
+   * Ignored on iOS and Web.
+   */
+  foreground?: boolean;
   /**
    * Cross-instance single-flight (leader election). When set, only ONE app instance
    * sharing the resolved key fires this task; other instances defer their occurrence,

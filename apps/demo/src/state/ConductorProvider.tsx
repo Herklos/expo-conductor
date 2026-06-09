@@ -18,6 +18,24 @@ import Conductor, {
 
 export type TriggerMode = 'interval' | 'alarm' | 'notification';
 
+export interface ScheduleConfig {
+  kind: 'interval' | 'daily' | 'weekly' | 'cron';
+  everyMs: number;   // interval kind
+  hour: number;      // daily / weekly
+  minute: number;    // daily / weekly
+  weekday: number;   // weekly (0 = Sun)
+  cron: string;      // 3-field "minute hour dayOfWeek"
+}
+
+const DEFAULT_SCHEDULE: ScheduleConfig = {
+  kind: 'interval',
+  everyMs: 30_000,
+  hour: 9,
+  minute: 0,
+  weekday: 1,
+  cron: '0 9 *',
+};
+
 function fmtDateTime(ms: number): string {
   const d = new Date(ms);
   const pad = (n: number, w = 2) => String(n).padStart(w, '0');
@@ -31,6 +49,8 @@ interface ConductorContextValue {
   liveLog: string[];
   triggerMode: TriggerMode;
   setTriggerMode: (m: TriggerMode) => void;
+  scheduleConfig: ScheduleConfig;
+  setScheduleConfig: (c: ScheduleConfig) => void;
   refresh: () => Promise<void>;
   refreshHistory: () => Promise<void>;
   clearHistory: () => Promise<void>;
@@ -43,6 +63,8 @@ const ConductorContext = createContext<ConductorContextValue>({
   liveLog: [],
   triggerMode: 'interval',
   setTriggerMode: () => {},
+  scheduleConfig: DEFAULT_SCHEDULE,
+  setScheduleConfig: () => {},
   refresh: async () => {},
   refreshHistory: async () => {},
   clearHistory: async () => {},
@@ -54,6 +76,7 @@ export function ConductorProvider({ children }: { children: React.ReactNode }) {
   const [records, setRecords] = useState<TaskExecutionRecord[]>([]);
   const [liveLog, setLiveLog] = useState<string[]>([]);
   const [triggerMode, setTriggerMode] = useState<TriggerMode>('interval');
+  const [scheduleConfig, setScheduleConfig] = useState<ScheduleConfig>(DEFAULT_SCHEDULE);
   const logRef = useRef<string[]>([]);
 
   const appendLog = useCallback((line: string) => {
@@ -108,7 +131,7 @@ export function ConductorProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <ConductorContext.Provider
-      value={{ tasks, records, liveLog, triggerMode, setTriggerMode, refresh, refreshHistory, clearHistory, clearLiveLog }}
+      value={{ tasks, records, liveLog, triggerMode, setTriggerMode, scheduleConfig, setScheduleConfig, refresh, refreshHistory, clearHistory, clearLiveLog }}
     >
       {children}
     </ConductorContext.Provider>

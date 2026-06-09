@@ -146,6 +146,9 @@ object TaskMapper {
     return candidates.minOrNull()
   }
 
+  fun isForeground(task: JSONObject): Boolean =
+    task.optJSONObject("policy")?.optBoolean("foreground", false) ?: false
+
   fun hasAlarmTrigger(task: JSONObject) = triggerTypes(task).contains("alarm")
   fun allowWhileIdle(task: JSONObject): Boolean {
     val triggers = task.optJSONArray("triggers") ?: return true

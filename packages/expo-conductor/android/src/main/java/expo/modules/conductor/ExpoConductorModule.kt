@@ -8,6 +8,7 @@ import androidx.work.Constraints as WorkConstraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import expo.modules.conductor.engine.PolicyEngine
@@ -232,13 +233,17 @@ class ExpoConductorModule : Module() {
 
       nextRunAt != null -> {
         val delay = (nextRunAt - System.currentTimeMillis()).coerceAtLeast(0)
-        val request = OneTimeWorkRequestBuilder<ConductorWorker>()
+        val builder = OneTimeWorkRequestBuilder<ConductorWorker>()
           .setInitialDelay(delay, TimeUnit.MILLISECONDS)
           .setConstraints(workConstraints(task))
           .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
           .setInputData(ConductorWorker.inputData(id))
-          .build()
-        WorkManager.getInstance(context).enqueueUniqueWork(id, androidx.work.ExistingWorkPolicy.REPLACE, request)
+        // For foreground tasks on Android 12+, mark as expedited so WorkManager can start
+        // the FGS immediately even under background-start restrictions.
+        if (TaskMapper.isForeground(task) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+          builder.setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+        }
+        WorkManager.getInstance(context).enqueueUniqueWork(id, androidx.work.ExistingWorkPolicy.REPLACE, builder.build())
       }
     }
   }

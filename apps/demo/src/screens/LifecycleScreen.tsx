@@ -19,7 +19,7 @@ import {
   enableHeadlessBackground,
 } from '../backgroundTask';
 import { useTheme, type Theme } from '../theme';
-import { useConductor, type TriggerMode } from '../state/ConductorProvider';
+import { useConductor, type TriggerMode, type ScheduleConfig } from '../state/ConductorProvider';
 
 const MONO = Platform.select({ ios: 'Courier New', android: 'monospace' }) ?? 'monospace';
 
@@ -107,7 +107,7 @@ const btn = StyleSheet.create({
 // ─── Trigger mode selector ────────────────────────────────────────────────────
 
 const TRIGGER_MODES: { id: TriggerMode; label: string; sub: string }[] = [
-  { id: 'interval',     label: 'Interval',     sub: 'WorkManager · 30 s recurring' },
+  { id: 'interval',     label: 'Interval',     sub: 'WorkManager · recurrence trigger' },
   { id: 'alarm',        label: 'Exact Alarm',  sub: 'AlarmManager · precise timing' },
   { id: 'notification', label: 'Notification', sub: 'Local notification delivery · one-shot' },
 ];
@@ -168,6 +168,194 @@ const ts = StyleSheet.create({
   sub: { fontSize: 10, marginTop: 1 },
 });
 
+// ─── Schedule selector ────────────────────────────────────────────────────────
+
+const INTERVAL_PRESETS: { label: string; ms: number }[] = [
+  { label: '15 s', ms: 15_000 },
+  { label: '30 s', ms: 30_000 },
+  { label: '1 m',  ms: 60_000 },
+  { label: '5 m',  ms: 300_000 },
+  { label: '15 m', ms: 900_000 },
+  { label: '1 h',  ms: 3_600_000 },
+];
+
+const CRON_PRESETS: { label: string; expr: string }[] = [
+  { label: 'Every 5 m',   expr: '*/5 * *' },
+  { label: 'Every 15 m',  expr: '*/15 * *' },
+  { label: 'Every hour',  expr: '0 * *' },
+  { label: '9 am daily',  expr: '0 9 *' },
+  { label: 'Mon 9 am',    expr: '0 9 1' },
+];
+
+const HOURS   = [0, 6, 9, 12, 17, 20, 23];
+const MINUTES = [0, 15, 30, 45];
+const WEEKDAYS: { label: string; value: number }[] = [
+  { label: 'Sun', value: 0 }, { label: 'Mon', value: 1 }, { label: 'Tue', value: 2 },
+  { label: 'Wed', value: 3 }, { label: 'Thu', value: 4 }, { label: 'Fri', value: 5 },
+  { label: 'Sat', value: 6 },
+];
+
+function ChipRow({
+  items,
+  selected,
+  onSelect,
+  theme,
+}: {
+  items: { label: string; value: string | number }[];
+  selected: string | number;
+  onSelect: (v: string | number) => void;
+  theme: Theme;
+}) {
+  return (
+    <View style={ss.chipRow}>
+      {items.map((item) => {
+        const sel = item.value === selected;
+        return (
+          <Pressable
+            key={String(item.value)}
+            style={[
+              ss.chip,
+              { backgroundColor: sel ? theme.accent : theme.border + '60', borderColor: sel ? theme.accent : theme.border },
+            ]}
+            onPress={() => onSelect(item.value)}
+          >
+            <Text style={[ss.chipText, { color: sel ? '#fff' : theme.text, fontFamily: MONO }]}>
+              {item.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+function ScheduleSelector({
+  value,
+  onChange,
+  theme,
+}: {
+  value: ScheduleConfig;
+  onChange: (c: ScheduleConfig) => void;
+  theme: Theme;
+}) {
+  const patch = (p: Partial<ScheduleConfig>) => onChange({ ...value, ...p });
+
+  const KIND_ROWS: { id: ScheduleConfig['kind']; label: string; sub: string }[] = [
+    { id: 'interval', label: 'Interval', sub: 'Recurring every N ms' },
+    { id: 'daily',    label: 'Daily',    sub: 'Every day at HH:MM' },
+    { id: 'weekly',   label: 'Weekly',   sub: 'One weekday at HH:MM' },
+    { id: 'cron',     label: 'Cron',     sub: '3-field expression (min hr dow)' },
+  ];
+
+  return (
+    <View style={ss.wrap}>
+      {KIND_ROWS.map((k) => {
+        const sel = k.id === value.kind;
+        return (
+          <View key={k.id}>
+            <Pressable
+              style={[
+                ts.row,
+                { borderColor: sel ? theme.accent : theme.border, backgroundColor: sel ? theme.accentMuted : 'transparent' },
+              ]}
+              onPress={() => patch({ kind: k.id })}
+            >
+              <View style={[ts.radio, { borderColor: sel ? theme.accent : theme.muted }]}>
+                {sel && <View style={[ts.radioDot, { backgroundColor: theme.accent }]} />}
+              </View>
+              <View style={ts.textBlock}>
+                <Text style={[ts.lab, { color: sel ? theme.accent : theme.text }]}>{k.label}</Text>
+                <Text style={[ts.sub, { color: theme.muted, fontFamily: MONO }]}>{k.sub}</Text>
+              </View>
+            </Pressable>
+
+            {sel && k.id === 'interval' && (
+              <View style={ss.detail}>
+                <Text style={[ss.detailLabel, { color: theme.muted }]}>Interval</Text>
+                <ChipRow
+                  items={INTERVAL_PRESETS.map((p) => ({ label: p.label, value: p.ms }))}
+                  selected={value.everyMs}
+                  onSelect={(v) => patch({ everyMs: v as number })}
+                  theme={theme}
+                />
+              </View>
+            )}
+
+            {sel && k.id === 'daily' && (
+              <View style={ss.detail}>
+                <Text style={[ss.detailLabel, { color: theme.muted }]}>Hour</Text>
+                <ChipRow
+                  items={HOURS.map((h) => ({ label: String(h).padStart(2, '0'), value: h }))}
+                  selected={value.hour}
+                  onSelect={(v) => patch({ hour: v as number })}
+                  theme={theme}
+                />
+                <Text style={[ss.detailLabel, { color: theme.muted }]}>Minute</Text>
+                <ChipRow
+                  items={MINUTES.map((m) => ({ label: String(m).padStart(2, '0'), value: m }))}
+                  selected={value.minute}
+                  onSelect={(v) => patch({ minute: v as number })}
+                  theme={theme}
+                />
+              </View>
+            )}
+
+            {sel && k.id === 'weekly' && (
+              <View style={ss.detail}>
+                <Text style={[ss.detailLabel, { color: theme.muted }]}>Day</Text>
+                <ChipRow
+                  items={WEEKDAYS.map((d) => ({ label: d.label, value: d.value }))}
+                  selected={value.weekday}
+                  onSelect={(v) => patch({ weekday: v as number })}
+                  theme={theme}
+                />
+                <Text style={[ss.detailLabel, { color: theme.muted }]}>Hour</Text>
+                <ChipRow
+                  items={HOURS.map((h) => ({ label: String(h).padStart(2, '0'), value: h }))}
+                  selected={value.hour}
+                  onSelect={(v) => patch({ hour: v as number })}
+                  theme={theme}
+                />
+                <Text style={[ss.detailLabel, { color: theme.muted }]}>Minute</Text>
+                <ChipRow
+                  items={MINUTES.map((m) => ({ label: String(m).padStart(2, '0'), value: m }))}
+                  selected={value.minute}
+                  onSelect={(v) => patch({ minute: v as number })}
+                  theme={theme}
+                />
+              </View>
+            )}
+
+            {sel && k.id === 'cron' && (
+              <View style={ss.detail}>
+                <Text style={[ss.detailLabel, { color: theme.muted }]}>Preset expression</Text>
+                <ChipRow
+                  items={CRON_PRESETS.map((p) => ({ label: p.label, value: p.expr }))}
+                  selected={value.cron}
+                  onSelect={(v) => patch({ cron: v as string })}
+                  theme={theme}
+                />
+                <Text style={[ss.detailLabel, { color: theme.muted }]}>
+                  Active: <Text style={{ color: theme.accent, fontFamily: MONO }}>{value.cron}</Text>
+                </Text>
+              </View>
+            )}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+const ss = StyleSheet.create({
+  wrap: { gap: 4 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 6 },
+  chip: { paddingVertical: 4, paddingHorizontal: 10, borderRadius: 8, borderWidth: 1 },
+  chipText: { fontSize: 11, fontWeight: '600' },
+  detail: { paddingHorizontal: 14, paddingTop: 8, paddingBottom: 4 },
+  detailLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 1, marginBottom: 4 },
+});
+
 // ─── Permission / status row ──────────────────────────────────────────────────
 
 function InfoRow({
@@ -214,7 +402,7 @@ const ir = StyleSheet.create({
 
 export function LifecycleScreen() {
   const theme = useTheme();
-  const { tasks, refresh, triggerMode, setTriggerMode } = useConductor();
+  const { tasks, refresh, triggerMode, setTriggerMode, scheduleConfig, setScheduleConfig } = useConductor();
   const [conductorStatus, setConductorStatus] = useState<string | null>(null);
   const [permGranted, setPermGranted] = useState<boolean | null>(null);
   const [opResult, setOpResult] = useState('');
@@ -269,6 +457,17 @@ export function LifecycleScreen() {
         >
           <TriggerSelector value={triggerMode} onChange={setTriggerMode} theme={theme} />
         </Section>
+
+        {/* ── Schedule ── */}
+        {triggerMode !== 'notification' && (
+          <Section
+            title="SCHEDULE"
+            desc="Recurrence cadence used when 'Schedule active' runs in the Lab. Notification trigger uses a fixed 10s one-shot."
+            theme={theme}
+          >
+            <ScheduleSelector value={scheduleConfig} onChange={setScheduleConfig} theme={theme} />
+          </Section>
+        )}
 
         {/* ── Conductor control ── */}
         <Section
