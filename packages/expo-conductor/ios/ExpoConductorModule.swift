@@ -220,7 +220,7 @@ public class ExpoConductorModule: Module {
     }
   }
 
-  static func dispatchHeadless(_ task: [String: Any], data: [String: Any]) {
+  static func dispatchHeadless(_ task: [String: Any], data: [String: Any], firedBy: String? = nil) {
     guard let id = task["id"] as? String else { return }
     if TaskStore().isPaused() { return }
     // Honor execution policy (esp. expiry/window/charging) even on the headless path.
@@ -253,9 +253,11 @@ public class ExpoConductorModule: Module {
     // min(next recurrence, future one-shots), matching the live reschedule + Web; nil -> nothing
     // future, so don't re-arm (a fired one-shot is done).
     let recurrence = TaskMapper.parseRecurrence(task)
-    guard let next = TaskMapper.computeNextRunAt(task, recurrence, now, futureOnly: true) else { return }
+    let nextResult = TaskMapper.computeNextRunAt(task, recurrence, now, futureOnly: true)
+    guard let next = nextResult.nextRunAt else { return }
     var updated = task
     updated["nextRunAt"] = next
+    updated["nextFiredBy"] = nextResult.firedBy ?? NSNull()
     TaskStore().upsert(updated)
     // Re-arm the NEXT occurrence the same way the live `schedule` path does: a user-visible banner
     // only for a notification/time/alarm trigger; otherwise (a native recurrence-only task) wake
@@ -357,7 +359,7 @@ public class ExpoConductorModule: Module {
   /// whether the task actually fired (emitted onTaskExecute) — false when skipped by policy or
   /// budget — so [runDueBackgroundTasks] can report the number truly fired.
   @discardableResult
-  func dispatch(_ task: [String: Any], manual: Bool, data: [String: Any] = [:]) -> Bool {
+  func dispatch(_ task: [String: Any], manual: Bool, data: [String: Any] = [:], firedBy: String? = nil) -> Bool {
     guard let id = task["id"] as? String else { return false }
     let now = nowMs()
 
@@ -390,9 +392,18 @@ public class ExpoConductorModule: Module {
     let handlerType = handler?["type"] as? String ?? "js"
     let handlerName = handler?["name"] as? String ?? id
 
+    let resolvedFiredBy: String
+    if manual {
+      resolvedFiredBy = "manual"
+    } else if let fb = firedBy {
+      resolvedFiredBy = fb
+    } else {
+      resolvedFiredBy = (task["nextFiredBy"] as? String) ?? TaskMapper.primaryTriggerType(task)
+    }
     emit("onTaskExecute", [
       "taskId": id,
       "triggerType": TaskMapper.primaryTriggerType(task),
+      "firedBy": resolvedFiredBy,
       "firedAt": now,
       "attempt": 1,
       "data": data,
@@ -429,9 +440,10 @@ public class ExpoConductorModule: Module {
     // one-shots into `candidates.min()`, exactly like WebSchedulerEngine.reschedule/futureTriggers —
     // so a task with BOTH a recurrence AND a sooner one-shot honors both, and a fired one-shot with
     // nothing future stops.
-    let next = TaskMapper.computeNextRunAt(task, recurrence, now, futureOnly: true)
+    let nextResult = TaskMapper.computeNextRunAt(task, recurrence, now, futureOnly: true)
     var updated = task
-    updated["nextRunAt"] = next ?? NSNull()
+    updated["nextRunAt"] = nextResult.nextRunAt.map { $0 as Any } ?? NSNull()
+    updated["nextFiredBy"] = nextResult.firedBy.map { $0 as Any } ?? NSNull()
     store.upsert(updated)
     schedule(updated)
   }

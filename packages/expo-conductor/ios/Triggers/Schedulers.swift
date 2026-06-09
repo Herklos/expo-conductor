@@ -3,6 +3,11 @@ import UserNotifications
 #if canImport(BackgroundTasks)
 import BackgroundTasks
 #endif
+// BGContinuedProcessingTask requires iOS 26 / macOS 26.
+#if canImport(BackgroundTasks)
+// NOTE: BGContinuedProcessingTaskRequest is only available on iOS 26+.
+// All use sites are guarded by #available(iOS 26, *).
+#endif
 
 /// Schedules local notifications that fire conductor tasks. Used for `time`,
 /// `notification` and (as the iOS fallback) `alarm` triggers.
@@ -34,8 +39,9 @@ enum NotificationScheduler {
 /// this) and `registerLaunchHandlers(_:)` must run during app launch (done by
 /// `ConductorAppDelegate`).
 enum BackgroundScheduler {
-  static let refreshIdentifier    = "software.drakkar.expoconductor.refresh"
-  static let processingIdentifier = "software.drakkar.expoconductor.processing"
+  static let refreshIdentifier     = "software.drakkar.expoconductor.refresh"
+  static let processingIdentifier  = "software.drakkar.expoconductor.processing"
+  static let continuedIdentifier   = "software.drakkar.expoconductor.continued"
   private static var registered = false
 
   /// Register both BGTask launch handlers. Must be called before the app finishes
@@ -61,6 +67,15 @@ enum BackgroundScheduler {
       task.expirationHandler = { task.setTaskCompleted(success: false) }
       onLaunch()
       task.setTaskCompleted(success: true)
+    }
+
+    // BGContinuedProcessingTask — iOS 26+. Initiated by user action; continues after backgrounding.
+    if #available(iOS 26, *) {
+      BGTaskScheduler.shared.register(forTaskWithIdentifier: continuedIdentifier, using: nil) { task in
+        task.expirationHandler = { task.setTaskCompleted(success: false) }
+        onLaunch()
+        task.setTaskCompleted(success: true)
+      }
     }
     #endif
   }
@@ -95,6 +110,21 @@ enum BackgroundScheduler {
       try BGTaskScheduler.shared.submit(request)
     } catch {
       NSLog("[expo-conductor] BGTaskScheduler.submit(processing) failed: \(error.localizedDescription)")
+    }
+    #endif
+  }
+
+  /// Submit a BGContinuedProcessingTaskRequest (iOS 26+). Must be called from a user-action
+  /// context (button press, etc.) — the OS denies requests without user context.
+  static func submitContinued() {
+    #if canImport(BackgroundTasks)
+    if #available(iOS 26, *) {
+      let request = BGContinuedProcessingTaskRequest(identifier: continuedIdentifier)
+      do {
+        try BGTaskScheduler.shared.submit(request)
+      } catch {
+        NSLog("[expo-conductor] BGTaskScheduler.submit(continued) failed: \(error.localizedDescription)")
+      }
     }
     #endif
   }

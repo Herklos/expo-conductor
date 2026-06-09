@@ -1,0 +1,113 @@
+{
+  "description": "admit(budget, tasks) -> {admitted, deferred}. Tasks are ordered by the priority comparator, then admitted greedily while every weight dimension stays within budget (skip-over greedy).",
+  "cases": [
+    {
+      "name": "all tasks fit within budget",
+      "budget": { "cpu": 1, "network": 1, "battery": 1, "memory": 1 },
+      "tasks": [
+        { "id": "a", "priority": 5, "dueAt": 0, "weight": { "cpu": 0.3, "network": 0.2, "battery": 0.1, "memory": 0.2 } },
+        { "id": "b", "priority": 3, "dueAt": 0, "weight": { "cpu": 0.3, "network": 0.2, "battery": 0.1, "memory": 0.2 } }
+      ],
+      "expected": { "admitted": ["a", "b"], "deferred": [] }
+    },
+    {
+      "name": "cpu budget exceeded defers lower priority",
+      "budget": { "cpu": 1, "network": 1, "battery": 1, "memory": 1 },
+      "tasks": [
+        { "id": "a", "priority": 5, "dueAt": 0, "weight": { "cpu": 0.6, "network": 0.1, "battery": 0.1, "memory": 0.1 } },
+        { "id": "b", "priority": 3, "dueAt": 0, "weight": { "cpu": 0.6, "network": 0.1, "battery": 0.1, "memory": 0.1 } }
+      ],
+      "expected": { "admitted": ["a"], "deferred": ["b"] }
+    },
+    {
+      "name": "skip-over greedy admits a smaller lower-priority task",
+      "budget": { "cpu": 1, "network": 1, "battery": 1, "memory": 1 },
+      "tasks": [
+        { "id": "a", "priority": 10, "dueAt": 0, "weight": { "cpu": 0.8, "network": 0.1, "battery": 0.1, "memory": 0.1 } },
+        { "id": "b", "priority": 5, "dueAt": 0, "weight": { "cpu": 0.5, "network": 0.1, "battery": 0.1, "memory": 0.1 } },
+        { "id": "c", "priority": 1, "dueAt": 0, "weight": { "cpu": 0.2, "network": 0.1, "battery": 0.1, "memory": 0.1 } }
+      ],
+      "expected": { "admitted": ["a", "c"], "deferred": ["b"] }
+    },
+    {
+      "name": "network is the binding dimension",
+      "budget": { "cpu": 1, "network": 0.5, "battery": 1, "memory": 1 },
+      "tasks": [
+        { "id": "a", "priority": 5, "dueAt": 0, "weight": { "cpu": 0.1, "network": 0.4, "battery": 0.1, "memory": 0.1 } },
+        { "id": "b", "priority": 3, "dueAt": 0, "weight": { "cpu": 0.1, "network": 0.4, "battery": 0.1, "memory": 0.1 } }
+      ],
+      "expected": { "admitted": ["a"], "deferred": ["b"] }
+    },
+    {
+      "name": "exact-fit boundary admits both",
+      "budget": { "cpu": 1, "network": 1, "battery": 1, "memory": 1 },
+      "tasks": [
+        { "id": "a", "priority": 2, "dueAt": 0, "weight": { "cpu": 0.5, "network": 0.5, "battery": 0.5, "memory": 0.5 } },
+        { "id": "b", "priority": 1, "dueAt": 0, "weight": { "cpu": 0.5, "network": 0.5, "battery": 0.5, "memory": 0.5 } }
+      ],
+      "expected": { "admitted": ["a", "b"], "deferred": [] }
+    },
+    {
+      "name": "priority order respected before admission",
+      "budget": { "cpu": 1, "network": 1, "battery": 1, "memory": 1 },
+      "tasks": [
+        { "id": "low", "priority": 1, "dueAt": 0, "weight": { "cpu": 0.7, "network": 0.1, "battery": 0.1, "memory": 0.1 } },
+        { "id": "high", "priority": 9, "dueAt": 0, "weight": { "cpu": 0.7, "network": 0.1, "battery": 0.1, "memory": 0.1 } }
+      ],
+      "expected": { "admitted": ["high"], "deferred": ["low"] }
+    },
+    {
+      "name": "float-fragile: 0.1+0.1+0.1 exceeds a 0.3 budget (strict <=, no epsilon)",
+      "budget": { "cpu": 0.3, "network": 1, "battery": 1, "memory": 1 },
+      "tasks": [
+        { "id": "a", "priority": 3, "dueAt": 0, "weight": { "cpu": 0.1, "network": 0, "battery": 0, "memory": 0 } },
+        { "id": "b", "priority": 2, "dueAt": 0, "weight": { "cpu": 0.1, "network": 0, "battery": 0, "memory": 0 } },
+        { "id": "c", "priority": 1, "dueAt": 0, "weight": { "cpu": 0.1, "network": 0, "battery": 0, "memory": 0 } }
+      ],
+      "expected": { "admitted": ["a", "b"], "deferred": ["c"] }
+    },
+    {
+      "name": "empty task list",
+      "budget": { "cpu": 1, "network": 1, "battery": 1, "memory": 1 },
+      "tasks": [],
+      "expected": { "admitted": [], "deferred": [] }
+    },
+    {
+      "name": "maxConcurrent caps how many run simultaneously",
+      "budget": { "cpu": 1, "network": 1, "battery": 1, "memory": 1 },
+      "tasks": [
+        { "id": "a", "priority": 3, "dueAt": 0, "maxConcurrent": 2, "weight": { "cpu": 0.1, "network": 0.1, "battery": 0.1, "memory": 0.1 } },
+        { "id": "b", "priority": 2, "dueAt": 0, "maxConcurrent": 2, "weight": { "cpu": 0.1, "network": 0.1, "battery": 0.1, "memory": 0.1 } },
+        { "id": "c", "priority": 1, "dueAt": 0, "maxConcurrent": 2, "weight": { "cpu": 0.1, "network": 0.1, "battery": 0.1, "memory": 0.1 } }
+      ],
+      "expected": { "admitted": ["a", "b"], "deferred": ["c"] }
+    },
+    {
+      "name": "running tasks consume the budget",
+      "budget": { "cpu": 1, "network": 1, "battery": 1, "memory": 1 },
+      "used": { "cpu": 0.8, "network": 0, "battery": 0, "memory": 0 },
+      "tasks": [
+        { "id": "x", "priority": 1, "dueAt": 0, "weight": { "cpu": 0.3, "network": 0.1, "battery": 0.1, "memory": 0.1 } }
+      ],
+      "expected": { "admitted": [], "deferred": ["x"] }
+    },
+    {
+      "name": "running count blocks a maxConcurrent:1 task",
+      "budget": { "cpu": 1, "network": 1, "battery": 1, "memory": 1 },
+      "running": 1,
+      "tasks": [
+        { "id": "solo", "priority": 1, "dueAt": 0, "maxConcurrent": 1, "weight": { "cpu": 0.1, "network": 0.1, "battery": 0.1, "memory": 0.1 } }
+      ],
+      "expected": { "admitted": [], "deferred": ["solo"] }
+    },
+    {
+      "name": "id tiebreaker decides admission by UTF-16 code-unit order (astral vs BMP)",
+      "budget": { "cpu": 1, "network": 1, "battery": 1, "memory": 1 },
+      "tasks": [
+        { "id": "ﬀ", "priority": 0, "dueAt": 0, "weight": { "cpu": 0.6, "network": 0.1, "battery": 0.1, "memory": 0.1 } },
+        { "id": "😀", "priority": 0, "dueAt": 0, "weight": { "cpu": 0.6, "network": 0.1, "battery": 0.1, "memory": 0.1 } }
+      ],
+      "expected": { "admitted": ["😀"], "deferred": ["ﬀ"] }
+    }
+  ]
+}

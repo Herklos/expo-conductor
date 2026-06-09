@@ -1,0 +1,104 @@
+{
+  "description": "computeNextRunAt(triggers, recurrence, now) -> {nextRunAt, firedBy}. Tests winning-trigger selection and recurring-notification re-fire math. Verified by TS (Jest); Kotlin/Swift computeNextRunAt sits above the pure engine so it is covered by integration tests (not this fixture).",
+  "cases": [
+    {
+      "name": "single notification trigger with at",
+      "triggers": [{ "type": "notification", "at": 5000 }],
+      "recurrence": null,
+      "now": 0,
+      "expected": { "nextRunAt": 5000, "firedBy": "notification" }
+    },
+    {
+      "name": "single notification trigger with inSeconds",
+      "triggers": [{ "type": "notification", "inSeconds": 10 }],
+      "recurrence": null,
+      "now": 0,
+      "expected": { "nextRunAt": 10000, "firedBy": "notification" }
+    },
+    {
+      "name": "recurring notification re-derives from now on each re-arm",
+      "triggers": [{ "type": "notification", "inSeconds": 30, "recurring": true }],
+      "recurrence": null,
+      "now": 100000,
+      "expected": { "nextRunAt": 130000, "firedBy": "notification" }
+    },
+    {
+      "name": "alarm beats notification when earlier",
+      "triggers": [
+        { "type": "notification", "at": 9000 },
+        { "type": "alarm", "at": 3000 }
+      ],
+      "recurrence": null,
+      "now": 0,
+      "expected": { "nextRunAt": 3000, "firedBy": "alarm" }
+    },
+    {
+      "name": "notification beats alarm when earlier",
+      "triggers": [
+        { "type": "notification", "at": 2000 },
+        { "type": "alarm", "at": 5000 }
+      ],
+      "recurrence": null,
+      "now": 0,
+      "expected": { "nextRunAt": 2000, "firedBy": "notification" }
+    },
+    {
+      "name": "tie-breaking: first trigger in array order wins",
+      "triggers": [
+        { "type": "alarm", "at": 5000 },
+        { "type": "time", "at": 5000 }
+      ],
+      "recurrence": null,
+      "now": 0,
+      "expected": { "nextRunAt": 5000, "firedBy": "alarm" }
+    },
+    {
+      "name": "tie-breaking: notification before recurrence when at same time",
+      "triggers": [
+        { "type": "notification", "at": 1000 }
+      ],
+      "recurrence": { "kind": "interval", "everyMs": 1000, "anchor": 0 },
+      "now": 0,
+      "expected": { "nextRunAt": 1000, "firedBy": "notification" }
+    },
+    {
+      "name": "recurrence wins when earlier than notification",
+      "triggers": [
+        { "type": "notification", "at": 5000 }
+      ],
+      "recurrence": { "kind": "interval", "everyMs": 1000, "anchor": 0 },
+      "now": 0,
+      "expected": { "nextRunAt": 1000, "firedBy": "recurrence" }
+    },
+    {
+      "name": "no time-bearing triggers returns null",
+      "triggers": [
+        { "type": "push", "matchKey": "x" },
+        { "type": "background" }
+      ],
+      "recurrence": null,
+      "now": 0,
+      "expected": { "nextRunAt": null, "firedBy": null }
+    },
+    {
+      "name": "futureOnly: spent notification is dropped, recurrence still fires",
+      "triggers": [
+        { "type": "notification", "at": 1000 }
+      ],
+      "recurrence": { "kind": "interval", "everyMs": 2000, "anchor": 0 },
+      "now": 2000,
+      "futureOnly": true,
+      "expected": { "nextRunAt": 4000, "firedBy": "recurrence" }
+    },
+    {
+      "name": "futureOnly: recurring notification is kept (never spent)",
+      "triggers": [
+        { "type": "notification", "inSeconds": 15, "recurring": true }
+      ],
+      "recurrence": null,
+      "now": 50000,
+      "futureOnly": true,
+      "expected": { "nextRunAt": 65000, "firedBy": "notification" }
+    }
+  ]
+}

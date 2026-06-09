@@ -31,19 +31,24 @@ class ConductorWorker(context: Context, params: WorkerParameters) : CoroutineWor
       setForeground(buildForegroundInfo(id))
     }
 
+    // Use the winning trigger persisted by the previous reschedule; falls back to
+    // "recurrence"/"background" based on which triggers the task declares.
+    // Use the winning trigger persisted by the previous reschedule as a best-effort source.
+    val firedBy = task.optString("nextFiredBy", null) ?: "background"
+
     val module = ExpoConductorModule.INSTANCE
     if (module == null) {
       // No JS runtime. Native + Rust handlers can run headless; JS handlers are deferred
       // (retry) so they execute once a JS runtime exists.
       val handlerType = task.optJSONObject("handler")?.optString("type")
       return if (handlerType == "native" || handlerType == "rust") {
-        ExpoConductorModule.dispatchHeadless(applicationContext, task, emptyMap())
+        ExpoConductorModule.dispatchHeadless(applicationContext, task, emptyMap(), firedBy = firedBy)
         Result.success()
       } else {
         Result.retry()
       }
     }
-    module.dispatch(task, manual = false)
+    module.dispatch(task, manual = false, firedBy = firedBy)
     return Result.success()
   }
 

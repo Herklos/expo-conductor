@@ -57,10 +57,29 @@ public class ConductorAppDelegate: ExpoAppDelegateSubscriber {
     // Pass the custom payload to handlers, minus the APNs internal `aps` envelope.
     var data = userInfo as? [String: Any] ?? [:]
     data.removeValue(forKey: "aps")
+    // Detect a silent push (content-available:1 + no alert). If the matched task has a
+    // bgProcessing trigger, schedule a BGProcessingTask window for the heavy work instead
+    // of running inline (#5 silent-APNs→BGProcessingTask chain).
+    let aps = userInfo["aps"] as? [String: Any]
+    let isSilent = (aps?["content-available"] as? Int) == 1 && aps?["alert"] == nil
+    let hasBgProcessing = (task["triggers"] as? [[String: Any]])?.contains {
+      ($0["type"] as? String) == "background" && ($0["bgProcessing"] as? Bool ?? false)
+    } ?? false
+    if isSilent && hasBgProcessing {
+      let bgTrigger = (task["triggers"] as? [[String: Any]])?.first { ($0["type"] as? String) == "background" }
+      let nowMs = Int(Date().timeIntervalSince1970 * 1000)
+      BackgroundScheduler.scheduleProcessing(
+        earliestMs: nowMs,
+        requiresNetwork: bgTrigger?["requiresNetwork"] as? Bool ?? false,
+        requiresCharging: bgTrigger?["requiresCharging"] as? Bool ?? false
+      )
+      completionHandler(.newData)
+      return
+    }
     if let module = ExpoConductorModule.shared {
-      module.dispatch(task, manual: false, data: data)
+      module.dispatch(task, manual: false, data: data, firedBy: "push")
     } else {
-      ExpoConductorModule.dispatchHeadless(task, data: data)
+      ExpoConductorModule.dispatchHeadless(task, data: data, firedBy: "push")
     }
     completionHandler(.newData)
   }

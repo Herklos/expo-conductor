@@ -219,7 +219,7 @@ class ExpoConductorModule : Module() {
 
     when {
       TaskMapper.hasAlarmTrigger(task) && nextRunAt != null ->
-        ConductorAlarmReceiver.schedule(context, id, nextRunAt, TaskMapper.allowWhileIdle(task))
+        ConductorAlarmReceiver.schedule(context, id, nextRunAt, TaskMapper.allowWhileIdle(task), TaskMapper.windowMs(task))
 
       recurrence != null -> {
         val intervalMs = TaskMapper.minimumIntervalMs(task)
@@ -276,7 +276,7 @@ class ExpoConductorModule : Module() {
    * the task actually fired (emitted onTaskExecute) — false when it was not yet due or was
    * skipped by policy/budget — so [runDueTasksAsync] can report the number truly fired.
    */
-  fun dispatch(task: JSONObject, manual: Boolean, data: Map<String, Any?> = emptyMap()): Boolean {
+  fun dispatch(task: JSONObject, manual: Boolean, data: Map<String, Any?> = emptyMap(), firedBy: String? = null): Boolean {
     val id = task.optString("id")
 
     if (!manual) {
@@ -332,9 +332,15 @@ class ExpoConductorModule : Module() {
       NotificationDisplay.show(context, id, title, body)
     }
 
+    val resolvedFiredBy = when {
+      manual -> "manual"
+      firedBy != null -> firedBy
+      else -> task.optString("nextFiredBy", null) ?: TaskMapper.primaryTriggerType(task)
+    }
     emit("onTaskExecute", mapOf(
       "taskId" to id,
       "triggerType" to TaskMapper.primaryTriggerType(task),
+      "firedBy" to resolvedFiredBy,
       "firedAt" to System.currentTimeMillis(),
       "attempt" to 1,
       "data" to data,
@@ -388,12 +394,13 @@ class ExpoConductorModule : Module() {
    */
   private fun reschedule(task: JSONObject) {
     val recurrence = TaskMapper.recurrence(task)
-    val next = TaskMapper.computeNextRunAt(task, recurrence, System.currentTimeMillis(), futureOnly = true)
+    val (next, nextFiredBy) = TaskMapper.computeNextRunAt(task, recurrence, System.currentTimeMillis(), futureOnly = true)
     if (next == null) task.put("nextRunAt", JSONObject.NULL) else task.put("nextRunAt", next)
+    if (nextFiredBy == null) task.put("nextFiredBy", JSONObject.NULL) else task.put("nextFiredBy", nextFiredBy)
     store.upsert(task)
     // Exact alarms do not self-repeat (unlike periodic WorkManager) — re-arm the next one.
     if (next != null && TaskMapper.hasAlarmTrigger(task)) {
-      ConductorAlarmReceiver.schedule(context, task.optString("id"), next, TaskMapper.allowWhileIdle(task))
+      ConductorAlarmReceiver.schedule(context, task.optString("id"), next, TaskMapper.allowWhileIdle(task), TaskMapper.windowMs(task))
     }
   }
 
@@ -453,7 +460,7 @@ class ExpoConductorModule : Module() {
      * handlers cannot run here and are left for the next app launch.
      */
     @JvmStatic
-    internal fun dispatchHeadless(context: Context, task: JSONObject, data: Map<String, Any?>) {
+    internal fun dispatchHeadless(context: Context, task: JSONObject, data: Map<String, Any?>, firedBy: String? = null) {
       if (TaskStore(context).isPaused()) return
       // Honor execution policy (esp. expiry/window/charging) even on the headless path.
       val ctx = DeviceInfo.read(context, System.currentTimeMillis())
@@ -486,11 +493,13 @@ class ExpoConductorModule : Module() {
       // min(next recurrence, future one-shots), matching the live reschedule + Web; null -> nothing
       // future, so don't re-arm (a fired one-shot is done).
       val recurrence = TaskMapper.recurrence(task)
-      val next = TaskMapper.computeNextRunAt(task, recurrence, System.currentTimeMillis(), futureOnly = true) ?: return
+      val (next, nextFiredBy) = TaskMapper.computeNextRunAt(task, recurrence, System.currentTimeMillis(), futureOnly = true)
+      if (next == null) return
       task.put("nextRunAt", next)
+      if (nextFiredBy == null) task.put("nextFiredBy", JSONObject.NULL) else task.put("nextFiredBy", nextFiredBy)
       TaskStore(context).upsert(task)
       if (TaskMapper.hasAlarmTrigger(task)) {
-        ConductorAlarmReceiver.schedule(context, id, next, TaskMapper.allowWhileIdle(task))
+        ConductorAlarmReceiver.schedule(context, id, next, TaskMapper.allowWhileIdle(task), TaskMapper.windowMs(task))
       }
     }
   }

@@ -44,8 +44,8 @@ describe('normalize', () => {
 });
 
 describe('computeNextRunAt', () => {
-  it('returns the earliest of multiple triggers', () => {
-    const next = computeNextRunAt(
+  it('returns the earliest of multiple triggers with the winning type', () => {
+    const result = computeNextRunAt(
       [
         { type: 'time', at: 9000 },
         { type: 'alarm', at: 3000 },
@@ -54,10 +54,51 @@ describe('computeNextRunAt', () => {
       undefined,
       0,
     );
-    expect(next).toBe(3000);
+    expect(result.nextRunAt).toBe(3000);
+    expect(result.firedBy).toBe('alarm');
   });
 
   it('returns null when no trigger implies a concrete time', () => {
-    expect(computeNextRunAt([{ type: 'push' }, { type: 'background' }], undefined, 0)).toBeNull();
+    const result = computeNextRunAt([{ type: 'push' }, { type: 'background' }], undefined, 0);
+    expect(result.nextRunAt).toBeNull();
+    expect(result.firedBy).toBeNull();
+  });
+
+  it('picks the first trigger in array order when two resolve to the same time (tie-breaking)', () => {
+    const result = computeNextRunAt(
+      [
+        { type: 'alarm', at: 5000 },
+        { type: 'time', at: 5000 },
+      ],
+      undefined,
+      0,
+    );
+    expect(result.nextRunAt).toBe(5000);
+    expect(result.firedBy).toBe('alarm'); // first in array wins
+  });
+
+  it('recurrence explicit field is evaluated last (after triggers[])', () => {
+    const result = computeNextRunAt(
+      [{ type: 'alarm', at: 5000 }],
+      { kind: 'interval', everyMs: 3000 }, // recurrence would produce 3000, alarm produces 5000
+      0,
+    );
+    // recurrence (3000) < alarm (5000), so recurrence wins
+    expect(result.nextRunAt).toBe(3000);
+    expect(result.firedBy).toBe('recurrence');
+  });
+
+  it('recurring notification with inSeconds always re-derives regardless of futureOnly intent', () => {
+    // futureOnly filtering is done BEFORE computeNextRunAt (in futureTriggers), not inside.
+    // A recurring notification is kept in the trigger array by futureTriggers, so
+    // computeNextRunAt sees it and re-derives now + inSeconds*1000.
+    const now = 100_000;
+    const result = computeNextRunAt(
+      [{ type: 'notification', inSeconds: 10, recurring: true }],
+      undefined,
+      now,
+    );
+    expect(result.nextRunAt).toBe(now + 10_000);
+    expect(result.firedBy).toBe('notification');
   });
 });

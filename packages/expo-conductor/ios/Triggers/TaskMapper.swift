@@ -28,11 +28,9 @@ enum TaskMapper {
     if task["policy"] == nil { task["policy"] = [String: Any]() }
 
     let rec = parseRecurrence(task)
-    if let next = computeNextRunAt(task, rec, now) {
-      task["nextRunAt"] = next
-    } else {
-      task["nextRunAt"] = NSNull()
-    }
+    let result = computeNextRunAt(task, rec, now)
+    task["nextRunAt"] = result.nextRunAt.map { $0 as Any } ?? NSNull()
+    task["nextFiredBy"] = result.firedBy.map { $0 as Any } ?? NSNull()
     task["createdAt"] = now
     return task
   }
@@ -122,25 +120,46 @@ enum TaskMapper {
     weight(task["weight"])
   }
 
-  /// Earliest concrete fire time from the task's triggers + recurrence. With `futureOnly` the
-  /// one-shot triggers (time/notification/alarm) are kept only when their absolute `at` is still
-  /// in the future, and relative `inSeconds` ones are dropped (they already fired) — mirroring
-  /// WebSchedulerEngine.futureTriggers, so re-computing after a fire clears a spent one-shot.
-  static func computeNextRunAt(_ task: [String: Any], _ recurrence: Recurrence?, _ now: Int, futureOnly: Bool = false) -> Int? {
-    var candidates: [Int] = []
+  struct NextRunResult {
+    let nextRunAt: Int?
+    let firedBy: String?
+  }
+
+  /// Earliest concrete fire time from the task's triggers + recurrence, and the trigger type
+  /// that produced it. With `futureOnly` one-shot triggers are kept only when still future;
+  /// recurring notifications (recurring==true + inSeconds) are always re-evaluated.
+  ///
+  /// Tie-breaking: first candidate achieving the min in iteration order wins; the explicit
+  /// `recurrence` field is evaluated last — mirrors the TS/Kotlin engines.
+  static func computeNextRunAt(_ task: [String: Any], _ recurrence: Recurrence?, _ now: Int, futureOnly: Bool = false) -> NextRunResult {
+    var best: Int? = nil
+    var bestType: String? = nil
+    func consider(_ at: Int, _ type: String) {
+      if best == nil || at < best! { best = at; bestType = type }
+    }
     if let triggers = task["triggers"] as? [[String: Any]] {
       for t in triggers {
         switch t["type"] as? String {
-        case "time", "notification":
-          if let at = int(t["at"]) { if !futureOnly || at > now { candidates.append(at) } }
-          else if !futureOnly, let inSeconds = int(t["inSeconds"]) { candidates.append(now + inSeconds * 1000) }
+        case "time":
+          if let at = int(t["at"]) { if !futureOnly || at > now { consider(at, "time") } }
+          else if !futureOnly, let inSeconds = int(t["inSeconds"]) { consider(now + inSeconds * 1000, "time") }
+        case "notification":
+          let recurring = (t["recurring"] as? Bool) ?? false
+          if recurring, let inSeconds = int(t["inSeconds"]) {
+            // Recurring: always re-derive, never drops on futureOnly.
+            consider(now + inSeconds * 1000, "notification")
+          } else if let at = int(t["at"]) {
+            if !futureOnly || at > now { consider(at, "notification") }
+          } else if !futureOnly, let inSeconds = int(t["inSeconds"]) {
+            consider(now + inSeconds * 1000, "notification")
+          }
         case "alarm":
-          if let at = int(t["at"]) { if !futureOnly || at > now { candidates.append(at) } }
+          if let at = int(t["at"]) { if !futureOnly || at > now { consider(at, "alarm") } }
         case "recurrence":
           if let r = t["recurrence"] as? [String: Any],
              let rec = parseRecurrence(["recurrence": r]),
              let next = RecurrenceEngine.nextRun(rec, now) {
-            candidates.append(next)
+            consider(next, "recurrence")
           }
         default:
           break
@@ -148,9 +167,9 @@ enum TaskMapper {
       }
     }
     if let rec = recurrence, let next = RecurrenceEngine.nextRun(rec, now) {
-      candidates.append(next)
+      consider(next, "recurrence")
     }
-    return candidates.min()
+    return NextRunResult(nextRunAt: best, firedBy: bestType)
   }
 
   static func primaryTriggerType(_ task: [String: Any]) -> String {

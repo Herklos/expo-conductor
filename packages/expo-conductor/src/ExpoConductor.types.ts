@@ -82,6 +82,12 @@ export interface NotificationTrigger {
   inSeconds?: number;
   /** If true, also fire the task in the background when delivered. */
   runInBackground?: boolean;
+  /**
+   * Re-fire repeatedly: after each delivery, re-arm a new notification `inSeconds` later.
+   * Only meaningful with `inSeconds` (no fixed `at`). The interval is re-derived from
+   * `now + inSeconds*1000` at each re-arm so clock drift doesn't accumulate.
+   */
+  recurring?: boolean;
 }
 
 /** Fire when a remote data message arrives (FCM on Android, APNs on iOS). */
@@ -97,6 +103,13 @@ export interface AlarmTrigger {
   at: number;
   /** Wake the device even in Doze (Android `setExactAndAllowWhileIdle`). */
   allowWhileIdle?: boolean;
+  /**
+   * Android only. Use `AlarmManager.setWindow(RTC_WAKEUP, at, windowMs, …)` instead of an
+   * exact alarm. The OS may fire anywhere in the `[at, at+windowMs]` window, which allows
+   * more battery-efficient batching than `setExact`. Ignored when exact alarms are not
+   * available (the engine falls back to inexact). Ignored on iOS and Web.
+   */
+  windowMs?: number;
 }
 
 /** Run as an OS deferrable background task (WorkManager / BGTaskScheduler). */
@@ -126,6 +139,17 @@ export interface AppStateTrigger {
   on: 'foreground' | 'background';
 }
 
+/**
+ * iOS 26+ only. Submit a `BGContinuedProcessingTask` — a long-running background task
+ * started from an explicit user action. The task continues after the user backgrounds the
+ * app and is not subject to the ~30-minute BGProcessingTask cap. Must originate from a
+ * direct user interaction (button press, etc.); the OS will deny requests made without
+ * user context. Silently ignored on iOS < 26 and on Android/Web.
+ */
+export interface ContinuedProcessingTrigger {
+  type: 'userInitiatedBackground';
+}
+
 export type Trigger =
   | TimeTrigger
   | RecurrenceTrigger
@@ -133,9 +157,21 @@ export type Trigger =
   | PushTrigger
   | AlarmTrigger
   | BackgroundTaskTrigger
-  | AppStateTrigger;
+  | AppStateTrigger
+  | ContinuedProcessingTrigger;
 
 export type TriggerType = Trigger['type'];
+
+/**
+ * The source that caused a specific task execution.
+ * - A `TriggerType` value means the corresponding trigger fired (e.g. `'alarm'`).
+ * - `'manual'` means the task was triggered explicitly via `runNow()` / `runDueTasksAsync()`.
+ *
+ * Best-effort on native: for a multi-trigger task where WorkManager runs the worker, the
+ * worker only knows "a worker ran" and reports the winner from the previous
+ * `computeNextRunAt` result. For precise attribution prefer single-trigger tasks.
+ */
+export type FiredBy = TriggerType | 'manual';
 
 // ---------------------------------------------------------------------------
 // Execution policy & constraints
@@ -292,6 +328,10 @@ export interface RegisteredTask {
   metadata?: Record<string, unknown>;
   /** Next computed run time (UTC epoch ms) or null if not scheduled. */
   nextRunAt: number | null;
+  /** The trigger that will cause the next execution (winning result from the last
+   *  `computeNextRunAt` call). Set by `reschedule`; read by `fire` to populate
+   *  the public `firedBy` on the emitted event. */
+  nextFiredBy?: TriggerType | null;
   createdAt: number;
 }
 
@@ -332,6 +372,9 @@ export interface DeviceContext {
 export interface TaskEventPayload {
   taskId: string;
   triggerType: TriggerType;
+  /** Which source actually caused this execution. `'manual'` for explicit `runNow()` calls;
+   *  a `TriggerType` value when fired by the scheduler. See {@link FiredBy}. */
+  firedBy?: FiredBy;
   firedAt: number;
   attempt: number;
   data?: Record<string, unknown>;
@@ -392,6 +435,8 @@ export interface TaskExecutionEvent {
   triggeredAt: number;
   /** Present for execute/complete/error events. */
   triggerType?: TriggerType;
+  /** The actual dispatch source for execute events. See {@link FiredBy}. */
+  firedBy?: FiredBy;
   attempt?: number;
   /** Present for complete events. */
   result?: TaskResult;
@@ -416,6 +461,8 @@ export type TaskExecutionStatus = 'running' | 'completed' | 'failed' | 'error' |
 export interface TaskExecutionRecord {
   taskId: string;
   triggerType: TriggerType;
+  /** The actual dispatch source. See {@link FiredBy}. */
+  firedBy?: FiredBy;
   /** UTC epoch ms when the task was dispatched (execute event). */
   firedAt: number;
   attempt: number;

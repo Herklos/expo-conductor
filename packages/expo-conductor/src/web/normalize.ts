@@ -9,6 +9,7 @@ import {
   type RegisteredTask,
   type TaskDefinition,
   type Trigger,
+  type TriggerType,
 } from '../ExpoConductor.types';
 import { isValidCronExpression, nextRun } from './engine/recurrence';
 import { resolveWeight } from './engine/weight';
@@ -35,27 +36,49 @@ export function assertValidRecurrence(recurrence: Recurrence | undefined): void 
   }
 }
 
-/** Compute the earliest concrete fire time implied by a task's triggers. */
+export interface NextRunResult {
+  nextRunAt: number | null;
+  /** The trigger type that produced the earliest run time, or null when nothing is scheduled. */
+  firedBy: TriggerType | null;
+}
+
+/**
+ * Compute the earliest concrete fire time implied by a task's triggers, and identify which
+ * trigger type won. Iteration order is preserved: when two triggers resolve to the same
+ * timestamp, the first one in `triggers[]` wins; the explicit `recurrence` field is checked
+ * last (mirror of Kotlin/Swift behavior — do not change the order).
+ */
 export function computeNextRunAt(
   triggers: Trigger[],
   recurrence: Recurrence | undefined,
   now: number,
-): number | null {
-  const candidates: number[] = [];
+): NextRunResult {
+  let best: number | null = null;
+  let bestType: TriggerType | null = null;
+
+  function consider(at: number, type: TriggerType): void {
+    if (best === null || at < best) {
+      best = at;
+      bestType = type;
+    }
+  }
 
   for (const trigger of triggers) {
     switch (trigger.type) {
       case 'time':
+        if (trigger.at != null) consider(trigger.at, 'time');
+        else if (trigger.inSeconds != null) consider(now + trigger.inSeconds * 1000, 'time');
+        break;
       case 'notification':
-        if (trigger.at != null) candidates.push(trigger.at);
-        else if (trigger.inSeconds != null) candidates.push(now + trigger.inSeconds * 1000);
+        if (trigger.at != null) consider(trigger.at, 'notification');
+        else if (trigger.inSeconds != null) consider(now + trigger.inSeconds * 1000, 'notification');
         break;
       case 'alarm':
-        candidates.push(trigger.at);
+        consider(trigger.at, 'alarm');
         break;
       case 'recurrence': {
         const next = nextRun(trigger.recurrence, now);
-        if (next != null) candidates.push(next);
+        if (next != null) consider(next, 'recurrence');
         break;
       }
       default:
@@ -65,16 +88,16 @@ export function computeNextRunAt(
 
   if (recurrence) {
     const next = nextRun(recurrence, now);
-    if (next != null) candidates.push(next);
+    if (next != null) consider(next, 'recurrence');
   }
 
-  if (candidates.length === 0) return null;
-  return Math.min(...candidates);
+  return { nextRunAt: best, firedBy: bestType };
 }
 
 export function normalize(def: TaskDefinition, now: number = Date.now()): RegisteredTask {
   const recurrence = recurrenceFor(def);
   assertValidRecurrence(recurrence);
+  const { nextRunAt, firedBy } = computeNextRunAt(def.triggers, recurrence, now);
   return {
     id: def.id,
     handler: def.handler ?? { name: def.id, type: 'js' },
@@ -84,7 +107,8 @@ export function normalize(def: TaskDefinition, now: number = Date.now()): Regist
     recurrence,
     policy: def.policy ?? {},
     metadata: def.metadata,
-    nextRunAt: computeNextRunAt(def.triggers, recurrence, now),
+    nextRunAt,
+    nextFiredBy: firedBy,
     createdAt: now,
   };
 }

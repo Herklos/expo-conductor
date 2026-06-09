@@ -1,0 +1,59 @@
+{
+  "description": "order(tasks) -> ids sorted by priority desc, then dueAt asc, then id asc.",
+  "cases": [
+    {
+      "name": "higher priority first",
+      "tasks": [
+        { "id": "a", "priority": 1, "dueAt": 0 },
+        { "id": "b", "priority": 5, "dueAt": 0 },
+        { "id": "c", "priority": 3, "dueAt": 0 }
+      ],
+      "expected": ["b", "c", "a"]
+    },
+    {
+      "name": "tie on priority breaks by earlier dueAt",
+      "tasks": [
+        { "id": "a", "priority": 2, "dueAt": 500 },
+        { "id": "b", "priority": 2, "dueAt": 100 },
+        { "id": "c", "priority": 2, "dueAt": 300 }
+      ],
+      "expected": ["b", "c", "a"]
+    },
+    {
+      "name": "tie on priority and dueAt breaks by id",
+      "tasks": [
+        { "id": "z", "priority": 1, "dueAt": 0 },
+        { "id": "a", "priority": 1, "dueAt": 0 },
+        { "id": "m", "priority": 1, "dueAt": 0 }
+      ],
+      "expected": ["a", "m", "z"]
+    },
+    {
+      "name": "mixed priority and dueAt",
+      "tasks": [
+        { "id": "low-late", "priority": 0, "dueAt": 900 },
+        { "id": "high-late", "priority": 10, "dueAt": 900 },
+        { "id": "high-early", "priority": 10, "dueAt": 100 },
+        { "id": "mid", "priority": 5, "dueAt": 50 }
+      ],
+      "expected": ["high-early", "high-late", "mid", "low-late"]
+    },
+    {
+      "name": "negative priorities",
+      "tasks": [
+        { "id": "a", "priority": -5, "dueAt": 0 },
+        { "id": "b", "priority": 0, "dueAt": 0 },
+        { "id": "c", "priority": -1, "dueAt": 0 }
+      ],
+      "expected": ["b", "c", "a"]
+    },
+    {
+      "name": "id tiebreaker uses UTF-16 code-unit order, not Unicode scalar (astral vs BMP)",
+      "tasks": [
+        { "id": "ﬀ", "priority": 0, "dueAt": 0 },
+        { "id": "😀", "priority": 0, "dueAt": 0 }
+      ],
+      "expected": ["😀", "ﬀ"]
+    }
+  ]
+}

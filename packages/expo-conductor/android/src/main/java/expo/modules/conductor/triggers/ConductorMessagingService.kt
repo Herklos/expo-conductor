@@ -44,9 +44,9 @@ class ConductorMessagingService : FirebaseMessagingService() {
       } ?: return
       val module = ExpoConductorModule.INSTANCE
       if (module != null) {
-        module.dispatch(task, manual = false, data = data)
+        module.dispatch(task, manual = false, data = data, firedBy = "push")
       } else {
-        ExpoConductorModule.dispatchHeadless(context, task, data)
+        ExpoConductorModule.dispatchHeadless(context, task, data, firedBy = "push")
       }
     }
   }

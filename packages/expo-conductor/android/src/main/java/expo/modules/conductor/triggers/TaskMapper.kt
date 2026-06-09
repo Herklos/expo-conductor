@@ -40,8 +40,9 @@ object TaskMapper {
     if (!json.has("policy") || json.isNull("policy")) json.put("policy", JSONObject())
 
     val recurrence = recurrence(json)
-    val nextRun = computeNextRunAt(json, recurrence, now)
+    val (nextRun, nextFiredBy) = computeNextRunAt(json, recurrence, now)
     if (nextRun == null) json.put("nextRunAt", JSONObject.NULL) else json.put("nextRunAt", nextRun)
+    if (nextFiredBy == null) json.put("nextFiredBy", JSONObject.NULL) else json.put("nextFiredBy", nextFiredBy)
     json.put("createdAt", now)
     return json
   }
@@ -117,33 +118,54 @@ object TaskMapper {
     return ResourceWeight(w.getDouble("cpu"), w.getDouble("network"), w.getDouble("battery"), w.getDouble("memory"))
   }
 
+  data class NextRunResult(val nextRunAt: Long?, val firedBy: String?)
+
   /**
-   * Earliest concrete fire time from the task's triggers + recurrence. With [futureOnly] the
-   * one-shot triggers (time/notification/alarm) are kept only when their absolute `at` is still
-   * in the future, and relative `inSeconds` ones are dropped (they already fired) — mirroring
-   * WebSchedulerEngine.futureTriggers, so re-computing after a fire clears a spent one-shot.
+   * Earliest concrete fire time from the task's triggers + recurrence, and the trigger type
+   * that produced it. With [futureOnly] the one-shot triggers (time/alarm) and non-recurring
+   * notification triggers are kept only when their absolute `at` is still in the future, and
+   * relative `inSeconds` ones are dropped (they already fired). Recurring notifications with
+   * `inSeconds` are always re-evaluated (mirrors WebSchedulerEngine.futureTriggers #6 fix).
+   *
+   * Tie-breaking: when two triggers produce the same timestamp the first one in trigger-array
+   * order wins; the explicit `recurrence` field is evaluated last — mirrors the TS engine.
    */
   fun computeNextRunAt(
     task: JSONObject,
     recurrence: Recurrence?,
     now: Long,
     futureOnly: Boolean = false,
-  ): Long? {
-    val candidates = mutableListOf<Long>()
+  ): NextRunResult {
+    var best: Long? = null
+    var bestType: String? = null
+    fun consider(at: Long, type: String) {
+      if (best == null || at < best!!) { best = at; bestType = type }
+    }
     val triggers = task.optJSONArray("triggers") ?: JSONArray()
     for (i in 0 until triggers.length()) {
       val t = triggers.getJSONObject(i)
       when (t.optString("type")) {
-        "time", "notification" ->
-          if (t.has("at")) { val at = t.getLong("at"); if (!futureOnly || at > now) candidates.add(at) }
-          else if (!futureOnly && t.has("inSeconds")) candidates.add(now + t.getLong("inSeconds") * 1000)
-        "alarm" -> if (t.has("at")) { val at = t.getLong("at"); if (!futureOnly || at > now) candidates.add(at) }
+        "time" ->
+          if (t.has("at")) { val at = t.getLong("at"); if (!futureOnly || at > now) consider(at, "time") }
+          else if (!futureOnly && t.has("inSeconds")) consider(now + t.getLong("inSeconds") * 1000, "time")
+        "notification" -> {
+          val recurring = t.optBoolean("recurring", false)
+          if (recurring && t.has("inSeconds")) {
+            // Recurring: re-derive interval regardless of futureOnly — never drops.
+            consider(now + t.getLong("inSeconds") * 1000, "notification")
+          } else if (t.has("at")) {
+            val at = t.getLong("at"); if (!futureOnly || at > now) consider(at, "notification")
+          } else if (!futureOnly && t.has("inSeconds")) {
+            consider(now + t.getLong("inSeconds") * 1000, "notification")
+          }
+        }
+        "alarm" -> if (t.has("at")) { val at = t.getLong("at"); if (!futureOnly || at > now) consider(at, "alarm") }
         "recurrence" -> recurrence(JSONObject().put("recurrence", t.optJSONObject("recurrence")))
-          ?.let { RecurrenceEngine.nextRun(it, now)?.let(candidates::add) }
+          ?.let { RecurrenceEngine.nextRun(it, now)?.let { next -> consider(next, "recurrence") } }
       }
     }
-    recurrence?.let { RecurrenceEngine.nextRun(it, now)?.let(candidates::add) }
-    return candidates.minOrNull()
+    recurrence?.let { RecurrenceEngine.nextRun(it, now)?.let { next -> consider(next, "recurrence") } }
+    return NextRunResult(best, bestType)
   }
 
   fun isForeground(task: JSONObject): Boolean =
@@ -157,6 +179,20 @@ object TaskMapper {
       if (t.optString("type") == "alarm") return t.optBoolean("allowWhileIdle", true)
     }
     return true
+  }
+
+  /** Window duration in ms for `AlarmManager.setWindow(…)`, or null when not set.
+   *  Returns the first alarm trigger's `windowMs` field if positive. */
+  fun windowMs(task: JSONObject): Long? {
+    val triggers = task.optJSONArray("triggers") ?: return null
+    for (i in 0 until triggers.length()) {
+      val t = triggers.getJSONObject(i)
+      if (t.optString("type") == "alarm" && t.has("windowMs")) {
+        val w = t.getLong("windowMs")
+        return if (w > 0) w else null
+      }
+    }
+    return null
   }
 
   fun minimumIntervalMs(task: JSONObject): Long {

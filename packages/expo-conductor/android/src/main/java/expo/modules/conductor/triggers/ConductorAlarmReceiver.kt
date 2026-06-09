@@ -20,10 +20,10 @@ class ConductorAlarmReceiver : BroadcastReceiver() {
     val task = TaskStore(context).get(id) ?: return
     val module = ExpoConductorModule.INSTANCE
     if (module != null) {
-      module.dispatch(task, manual = false)
+      module.dispatch(task, manual = false, firedBy = "alarm")
     } else {
       // No live module/JS: run native handlers and re-arm the next alarm anyway.
-      ExpoConductorModule.dispatchHeadless(context, task, emptyMap())
+      ExpoConductorModule.dispatchHeadless(context, task, emptyMap(), firedBy = "alarm")
     }
   }
 
@@ -45,13 +45,16 @@ class ConductorAlarmReceiver : BroadcastReceiver() {
       )
     }
 
-    fun schedule(context: Context, id: String, triggerAtMs: Long, allowWhileIdle: Boolean) {
+    fun schedule(context: Context, id: String, triggerAtMs: Long, allowWhileIdle: Boolean, windowMs: Long? = null) {
       val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
       val pi = pendingIntent(context, id)
       // On API 31+ exact-alarm permission is revocable; fall back to an inexact
       // allow-while-idle alarm rather than crashing with SecurityException.
       val canExact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S || am.canScheduleExactAlarms()
       when {
+        // windowMs: use setWindow for battery-efficient batching — no exact-alarm permission needed.
+        windowMs != null && windowMs > 0 ->
+          am.setWindow(AlarmManager.RTC_WAKEUP, triggerAtMs, windowMs, pi)
         !canExact && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ->
           am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMs, pi)
         allowWhileIdle && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ->

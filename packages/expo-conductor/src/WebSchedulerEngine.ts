@@ -14,6 +14,7 @@ import {
   type ConductorStatus,
   type DeviceContext,
   type ExpoConductorModuleEvents,
+  type FiredBy,
   type RegisteredTask,
   type ResourceBudget,
   type ResourceWeight,
@@ -298,6 +299,7 @@ export class WebSchedulerEngine implements ConductorBackend {
           taskId: p.taskId,
           triggeredAt: now,
           triggerType: p.triggerType,
+          firedBy: p.firedBy,
           attempt: p.attempt,
         });
         break;
@@ -352,7 +354,7 @@ export class WebSchedulerEngine implements ConductorBackend {
       this.timers.set(task.id, handle);
       return;
     }
-    const handle = this.setTimer(() => this.fire(task, false), delay);
+    const handle = this.setTimer(() => this.fire(task, false, task.nextFiredBy ?? undefined), delay);
     this.timers.set(task.id, handle);
   }
 
@@ -365,10 +367,10 @@ export class WebSchedulerEngine implements ConductorBackend {
   }
 
   /** Fire a task: enforce single-flight + policy + budget, then emit execute, then
-   *  reschedule. `firedBy` overrides the reported trigger type (e.g. an `appState` fire of
-   *  a task whose first trigger is a recurrence). Returns whether the task actually fired
-   *  (emitted onTaskExecute) — false when skipped by single-flight, policy or budget. */
-  private fire(task: RegisteredTask, manual: boolean, firedBy?: TriggerType): boolean {
+   *  reschedule. `dispatchSource` overrides the reported trigger type for special delivery
+   *  paths (e.g. an `appState` fire of a task whose first trigger is a recurrence). Returns
+   *  whether the task actually fired (emitted onTaskExecute) — false when skipped. */
+  private fire(task: RegisteredTask, manual: boolean, dispatchSource?: TriggerType): boolean {
     const now = this.now();
     const ctx: DeviceContext = { ...this.deviceContext(), now };
 
@@ -431,9 +433,12 @@ export class WebSchedulerEngine implements ConductorBackend {
           this.attempts.set(task.id, next);
           return next;
         })();
+    const triggerType = dispatchSource ?? task.triggers[0]?.type ?? 'time';
+    const firedBy: FiredBy = manual ? 'manual' : (dispatchSource ?? task.nextFiredBy ?? task.triggers[0]?.type ?? 'time');
     this.emit('onTaskExecute', {
       taskId: task.id,
-      triggerType: firedBy ?? task.triggers[0]?.type ?? 'time',
+      triggerType,
+      firedBy,
       firedAt: now,
       attempt,
     });
@@ -443,8 +448,8 @@ export class WebSchedulerEngine implements ConductorBackend {
   private reschedule(task: RegisteredTask, now: number): void {
     // Consider both the recurrence and any still-future one-shot triggers so a
     // task with e.g. a recurrence AND an alarm keeps honoring both.
-    const next = computeNextRunAt(futureTriggers(task.triggers, now), task.recurrence, now);
-    const updated: RegisteredTask = { ...task, nextRunAt: next };
+    const { nextRunAt, firedBy } = computeNextRunAt(futureTriggers(task.triggers, now), task.recurrence, now);
+    const updated: RegisteredTask = { ...task, nextRunAt, nextFiredBy: firedBy };
     this.registry.upsert(updated);
     this.scheduleTimer(updated);
   }
@@ -559,7 +564,7 @@ export class WebSchedulerEngine implements ConductorBackend {
     if (this.paused) return;
     for (const task of this.registry.all()) {
       if (task.triggers.some((t) => t.type === 'appState' && t.on === state)) {
-        this.fire(task, false, 'appState');
+        this.fire(task, false, 'appState' as TriggerType);
       }
     }
   }
@@ -580,11 +585,17 @@ function leaderKeyOf(task: RegisteredTask): string | null {
   return sf === true ? task.id : sf;
 }
 
-/** Keep only one-shot triggers whose time is still in the future. */
+/** Keep only triggers that can still fire: future one-shots, all recurrences, and recurring
+ *  notifications (which re-derive `now + inSeconds*1000` on each re-arm, so they never go
+ *  stale). One-shot notifications/time/alarm triggers with a past `at` are dropped. */
 function futureTriggers(triggers: Trigger[], now: number): Trigger[] {
   return triggers.filter((t) => {
-    if ((t.type === 'time' || t.type === 'notification' || t.type === 'alarm') && t.at != null) {
-      return t.at > now;
+    if (t.type === 'time' && t.at != null) return t.at > now;
+    if (t.type === 'alarm') return t.at > now;
+    if (t.type === 'notification') {
+      if (t.recurring && t.inSeconds != null) return true; // recurring: re-derives each time
+      if (t.at != null) return t.at > now;
+      return false; // inSeconds one-shot already fired
     }
     return t.type === 'recurrence';
   });

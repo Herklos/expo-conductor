@@ -86,6 +86,7 @@ const USE_EXACT_ALARM = 'android.permission.USE_EXACT_ALARM';
 const DEFAULT_BG_IDENTIFIERS = [
   'software.drakkar.expoconductor.refresh',
   'software.drakkar.expoconductor.processing',
+  'software.drakkar.expoconductor.continued', // iOS 26+ BGContinuedProcessingTask (#18)
 ];
 
 const withConductorAndroid: ConfigPlugin<ConductorPluginOptions> = (config, options) => {
@@ -131,12 +132,27 @@ const withConductorAndroid: ConfigPlugin<ConductorPluginOptions> = (config, opti
     return cfg;
   });
 
-  // FOREGROUND_SERVICE permissions: required when any task uses `policy.foreground: true`.
+  // FOREGROUND_SERVICE permissions + service declaration: required for FCM Doze-bypass (#2).
   if (options.enableForegroundService) {
     config = AndroidConfig.Permissions.withPermissions(config, [
       'android.permission.FOREGROUND_SERVICE',
       'android.permission.FOREGROUND_SERVICE_DATA_SYNC',
     ]);
+    config = withAndroidManifest(config, (cfg) => {
+      const app = AndroidConfig.Manifest.getMainApplicationOrThrow(cfg.modResults);
+      app.service = app.service ?? [];
+      const fgsName = 'expo.modules.conductor.triggers.ConductorForegroundService';
+      if (!app.service.some((s) => s.$['android:name'] === fgsName)) {
+        app.service.push({
+          $: {
+            'android:name': fgsName,
+            'android:exported': 'false',
+            'android:foregroundServiceType': 'dataSync',
+          },
+        } as never);
+      }
+      return cfg;
+    });
   }
 
   // The ConductorAlarmReceiver / BootReceiver are declared in the library's own

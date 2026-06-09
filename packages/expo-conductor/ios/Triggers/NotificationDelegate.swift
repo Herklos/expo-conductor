@@ -110,9 +110,9 @@ final class ConductorNotificationDelegate: NSObject, UNUserNotificationCenterDel
           let task = TaskStore().get(id) else { return }
     let data = userInfo as? [String: Any] ?? [:]
     if let module = ExpoConductorModule.shared {
-      module.dispatch(task, manual: false, data: data)
+      module.dispatch(task, manual: false, data: data, firedBy: "notification")
     } else {
-      ExpoConductorModule.dispatchHeadless(task, data: data)
+      ExpoConductorModule.dispatchHeadless(task, data: data, firedBy: "notification")
     }
   }
 }

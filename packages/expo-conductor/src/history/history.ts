@@ -42,6 +42,7 @@ export function foldHistory(events: TaskExecutionEvent[]): TaskExecutionRecord[]
           records.push({
             taskId: exec.taskId,
             triggerType: exec.triggerType ?? event.triggerType ?? 'time',
+            firedBy: exec.firedBy,
             firedAt: exec.triggeredAt,
             attempt: exec.attempt ?? 1,
             completedAt: event.triggeredAt,
@@ -59,6 +60,7 @@ export function foldHistory(events: TaskExecutionEvent[]): TaskExecutionRecord[]
           records.push({
             taskId: event.taskId,
             triggerType: event.triggerType ?? 'time',
+            firedBy: event.firedBy,
             firedAt: event.triggeredAt,
             attempt: event.attempt ?? 1,
             completedAt: event.triggeredAt,
@@ -79,6 +81,7 @@ export function foldHistory(events: TaskExecutionEvent[]): TaskExecutionRecord[]
         records.push({
           taskId: event.taskId,
           triggerType: event.triggerType ?? 'time',
+          firedBy: event.firedBy,
           firedAt: event.triggeredAt,
           attempt: 1,
           skippedReason: event.reason,
@@ -95,6 +98,7 @@ export function foldHistory(events: TaskExecutionEvent[]): TaskExecutionRecord[]
       records.push({
         taskId: exec.taskId,
         triggerType: exec.triggerType ?? 'time',
+        firedBy: exec.firedBy,
         firedAt: exec.triggeredAt,
         attempt: exec.attempt ?? 1,
         status: 'running',
