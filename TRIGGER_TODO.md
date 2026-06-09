@@ -14,15 +14,15 @@ to change across native code, types, and the config plugin.
 | 5 | APNs → BGProcessingTask chain       | iOS           | Near-real-time background                 | 2 h      | P2       |
 | 6 | Recurring notification trigger      | All platforms | Repeating notification-driven cadence     | 3–4 h    | P2       |
 | 2 | FCM Doze bypass (foreground svc)    | Android       | Doze-proof FCM tasks                      | 1 h      | P2       |
-| 7 | System broadcast triggers           | Android       | Charging/BT/USB/locale event tasks        | 2–3 h    | P2       |
-| 8 | Geofence trigger                    | Android       | Location-boundary task firing             | 3–4 h    | P2       |
-| 9 | Activity Recognition transitions    | Android       | Motion-state task firing                  | 2–3 h    | P2       |
-|12 | Significant Location Change         | iOS           | ~500m-movement background wakeup          | 2–3 h    | P2       |
-|13 | Region Monitoring (geofence)        | iOS           | Location-boundary task firing             | 1–2 h    | P2       |
-|10 | BLE device-presence scan            | Android       | BLE advertisement wakeup                  | 2–3 h    | P2       |
+| 3 | Windowed exact alarm                | Android       | Battery-friendly timing                   | 30 min   | P2       |
 |18 | BGContinuedProcessingTask (iOS 26+) | iOS           | User-initiated long-running background    | 2–3 h    | P2       |
-| 3 | Windowed exact alarm                | Android       | Battery-friendly timing                   | 30 min   | P3       |
+| 7 | System broadcast triggers           | Android       | Charging/BT/USB/locale event tasks        | 2–3 h    | P3       |
+| 8 | Geofence trigger                    | Android       | Location-boundary task firing             | 3–4 h    | P3       |
+| 9 | Activity Recognition transitions    | Android       | Motion-state task firing                  | 2–3 h    | P3       |
+|10 | BLE device-presence scan            | Android       | BLE advertisement wakeup                  | 2–3 h    | P3       |
 |11 | ContentUri job trigger              | Android       | ContentProvider change wakeup             | 1–2 h    | P3       |
+|12 | Significant Location Change         | iOS           | ~500m-movement background wakeup          | 2–3 h    | P3       |
+|13 | Region Monitoring (geofence)        | iOS           | Location-boundary task firing             | 1–2 h    | P3       |
 |14 | Location Visit Monitoring           | iOS           | Arrival/departure wakeup                  | 1 h      | P3       |
 |15 | Core Bluetooth state restoration    | iOS           | BLE advertisement/connection wakeup       | 3–4 h    | P3       |
 |16 | URLSession background transfer      | iOS           | Transfer-completion wakeup                | 2–3 h    | P3       |
@@ -129,7 +129,7 @@ interface AlarmTrigger {
   `setExact` / `setExactAndAllowWhileIdle`
 
 **Effort:** ~30 min  
-**Priority:** P3
+**Priority:** P2
 
 ---
 
@@ -166,7 +166,7 @@ interface AlarmTrigger {
 - `<receiver>` with `<intent-filter>` for each enabled action
 
 **Effort:** ~2–3 h  
-**Priority:** P2
+**Priority:** P3
 
 ---
 
@@ -192,7 +192,7 @@ interface AlarmTrigger {
 **Constraints:** max 100 geofences per app; min ~150m radius; `ACCESS_FINE_LOCATION` + `ACCESS_BACKGROUND_LOCATION` required; does NOT wake force-stopped apps.
 
 **Effort:** ~3–4 h  
-**Priority:** P2
+**Priority:** P3
 
 ---
 
@@ -219,7 +219,7 @@ interface AlarmTrigger {
 **Constraints:** Requires `ACTIVITY_RECOGNITION` permission (Android 10+); depends on Google Play Services; latency seconds–minutes.
 
 **Effort:** ~2–3 h  
-**Priority:** P2
+**Priority:** P3
 
 ---
 
@@ -244,7 +244,7 @@ interface AlarmTrigger {
 **Constraints:** `BLUETOOTH_SCAN` runtime permission (Android 12+); no-op when Bluetooth is off.
 
 **Effort:** ~2–3 h  
-**Priority:** P2
+**Priority:** P3
 
 ---
 
@@ -368,7 +368,7 @@ schedules the BGProcessingTask.
 **Constraints:** Requires "Always On" location permission; cannot wake force-quit app; low power (cell tower, no GPS).
 
 **Effort:** ~2–3 h  
-**Priority:** P2
+**Priority:** P3
 
 ---
 
@@ -394,7 +394,7 @@ schedules the BGProcessingTask.
 **Shares location delegate with:** #12 above.
 
 **Effort:** ~1–2 h (on top of #12)  
-**Priority:** P2
+**Priority:** P3
 
 ---
 
