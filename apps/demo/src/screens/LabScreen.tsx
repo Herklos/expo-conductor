@@ -95,7 +95,7 @@ const WEIGHT_OPTIONS: WeightPreset[] = ['light', 'moderate', 'heavy'];
 
 export function LabScreen() {
   const theme = useTheme();
-  const { tasks, refresh } = useConductor();
+  const { tasks, refresh, triggerMode } = useConductor();
   const [status, setStatus] = useState('');
   const [runningTasks, setRunningTasks] = useState<Record<string, boolean>>({});
   const [lastDurations, setLastDurations] = useState<Record<string, number>>({});
@@ -165,6 +165,23 @@ export function LabScreen() {
   // Schedule / cancel
   // ---------------------------------------------------------------------------
 
+  const buildTriggers = useCallback((taskId: string) => {
+    if (triggerMode === 'alarm') {
+      return [
+        { type: 'alarm' as const, at: Date.now() + 5_000, allowWhileIdle: true },
+        { type: 'recurrence' as const, recurrence: { kind: 'interval' as const, everyMs: 30_000 } },
+      ];
+    }
+    if (triggerMode === 'notification') {
+      return [
+        { type: 'notification' as const, title: 'Lab Task', body: taskId, inSeconds: 10, runInBackground: true },
+      ];
+    }
+    return [
+      { type: 'recurrence' as const, recurrence: { kind: 'interval' as const, everyMs: 30_000 } },
+    ];
+  }, [triggerMode]);
+
   const scheduleActive = useCallback(async () => {
     setStatus('Scheduling…');
     let scheduled = 0;
@@ -184,7 +201,7 @@ export function LabScreen() {
           await Conductor.schedule({
             id: taskId,
             handler: { name: handlerName, type: handlerType },
-            triggers: [{ type: 'recurrence', recurrence: { kind: 'interval', everyMs: 30_000 } }],
+            triggers: buildTriggers(taskId),
             priority: cell.priority,
             weight: cell.weight,
             policy: {
@@ -198,11 +215,11 @@ export function LabScreen() {
         }
       }
       await refresh();
-      setStatus(`✅ Scheduled ${scheduled} task${scheduled !== 1 ? 's' : ''}`);
+      setStatus(`✅ Scheduled ${scheduled} task${scheduled !== 1 ? 's' : ''} [${triggerMode}]`);
     } catch (e) {
       setStatus('⚠ ' + (e instanceof Error ? e.message : 'Schedule failed'));
     }
-  }, [cells, LANGS, refresh]);
+  }, [cells, LANGS, refresh, buildTriggers, triggerMode]);
 
   const cancelLab = useCallback(async () => {
     setStatus('Cancelling…');

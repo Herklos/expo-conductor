@@ -16,6 +16,8 @@ import Conductor, {
   type TaskExecutionRecord,
 } from 'expo-conductor';
 
+export type TriggerMode = 'interval' | 'alarm' | 'notification';
+
 function fmtDateTime(ms: number): string {
   const d = new Date(ms);
   const pad = (n: number, w = 2) => String(n).padStart(w, '0');
@@ -27,6 +29,8 @@ interface ConductorContextValue {
   tasks: RegisteredTask[];
   records: TaskExecutionRecord[];
   liveLog: string[];
+  triggerMode: TriggerMode;
+  setTriggerMode: (m: TriggerMode) => void;
   refresh: () => Promise<void>;
   refreshHistory: () => Promise<void>;
   clearHistory: () => Promise<void>;
@@ -36,6 +40,8 @@ const ConductorContext = createContext<ConductorContextValue>({
   tasks: [],
   records: [],
   liveLog: [],
+  triggerMode: 'interval',
+  setTriggerMode: () => {},
   refresh: async () => {},
   refreshHistory: async () => {},
   clearHistory: async () => {},
@@ -45,6 +51,7 @@ export function ConductorProvider({ children }: { children: React.ReactNode }) {
   const [tasks, setTasks] = useState<RegisteredTask[]>([]);
   const [records, setRecords] = useState<TaskExecutionRecord[]>([]);
   const [liveLog, setLiveLog] = useState<string[]>([]);
+  const [triggerMode, setTriggerMode] = useState<TriggerMode>('interval');
   const logRef = useRef<string[]>([]);
 
   const appendLog = useCallback((line: string) => {
@@ -94,7 +101,7 @@ export function ConductorProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <ConductorContext.Provider
-      value={{ tasks, records, liveLog, refresh, refreshHistory, clearHistory }}
+      value={{ tasks, records, liveLog, triggerMode, setTriggerMode, refresh, refreshHistory, clearHistory }}
     >
       {children}
     </ConductorContext.Provider>
