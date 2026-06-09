@@ -176,15 +176,80 @@ schedules the BGProcessingTask.
 
 ---
 
+## Cross-platform
+
+### 6. Recurring Notification Trigger
+
+**What:** Today a `notification` trigger is strictly one-shot — the `inSeconds`/`at`
+offset is resolved to a fixed timestamp at registration, and `futureTriggers()` drops
+it after delivery. To fire repeatedly via notification delivery, users must currently
+pair a `notification` trigger with a `recurrence` trigger, which fires a timer rather
+than a notification.
+
+Goal: let a `notification` trigger self-reschedule by re-computing `now + inSeconds`
+after each delivery and posting a new local notification to the OS.
+
+**API surface:**
+```ts
+interface NotificationTrigger {
+  type: 'notification';
+  title: string;
+  body?: string;
+  inSeconds?: number;   // existing
+  at?: number;          // existing
+  runInBackground?: boolean;
+  recurring?: boolean;  // NEW — re-schedules itself after each delivery
+}
+```
+
+When `recurring: true` and `inSeconds` is set, the engine re-schedules a new
+notification with the same `inSeconds` offset after each fire, effectively creating
+a repeating notification-driven cadence.
+
+**Web engine work:**
+
+`normalize.ts` / `computeNextRunAt`
+- When `trigger.recurring && trigger.inSeconds != null`, treat the trigger as
+  recurrent: re-derive `nextRunAt = now + inSeconds * 1000` in `reschedule()`
+  instead of dropping it via `futureTriggers()`
+
+`WebSchedulerEngine.ts` — `futureTriggers()`
+- Preserve recurring notification triggers regardless of their `at` value so
+  `reschedule()` can recompute the next fire time
+
+**Native work:**
+
+Android — `ConductorNotificationReceiver.kt`
+- After the notification fires and `dispatch()` completes, if the task's notification
+  trigger has `recurring: true`, re-schedule a new `AlarmManager` exact alarm for
+  `now + inSeconds * 1000` and post a new `NotificationCompat` notification for it
+
+iOS — `ConductorAppDelegate.swift` (NotificationDelegate path)
+- After `didReceive` dispatches the task, if `recurring: true`, call
+  `UNUserNotificationCenter.add(UNNotificationRequest(...))` with a new
+  `UNTimeIntervalNotificationTrigger(timeInterval: inSeconds, repeats: false)`
+  (set `repeats: false` and re-arm manually so the recurrence interval is
+  re-evaluated each time, consistent with the engine)
+
+**Fixture work:**
+- Add `recurring-notification.cases.json` (or extend `recurrence.cases.json`) to
+  cover the re-arm timing and cross-platform identity
+
+**Effort:** ~3–4 h (web: ~1 h; Android: ~1–1.5 h; iOS: ~1–1.5 h)  
+**Priority:** P2
+
+---
+
 ## Priority summary
 
-| # | Feature                          | Platform | Impact                        | Effort | Priority |
-|---|----------------------------------|----------|-------------------------------|--------|----------|
-| 1 | Foreground Service Worker        | Android  | Long-running, Doze-safe tasks | 3–4 h  | P1       |
-| 4 | BGProcessingTask trigger         | iOS      | 30-min background window      | 4–5 h  | P1       |
-| 5 | APNs → BGProcessingTask chain    | iOS      | Near-real-time background     | 2 h    | P2       |
-| 2 | FCM Doze bypass (foreground svc) | Android  | Doze-proof FCM tasks          | 1 h    | P2       |
-| 3 | Windowed exact alarm             | Android  | Battery-friendly timing       | 30 min | P3       |
+| # | Feature                          | Platform      | Impact                          | Effort | Priority |
+|---|----------------------------------|---------------|---------------------------------|--------|----------|
+| 1 | Foreground Service Worker        | Android       | Long-running, Doze-safe tasks   | 3–4 h  | P1       |
+| 4 | BGProcessingTask trigger         | iOS           | 30-min background window        | 4–5 h  | P1       |
+| 5 | APNs → BGProcessingTask chain    | iOS           | Near-real-time background       | 2 h    | P2       |
+| 6 | Recurring notification trigger   | All platforms | Repeating notification-driven cadence | 3–4 h | P2 |
+| 2 | FCM Doze bypass (foreground svc) | Android       | Doze-proof FCM tasks            | 1 h    | P2       |
+| 3 | Windowed exact alarm             | Android       | Battery-friendly timing         | 30 min | P3       |
 
 Implement #1 and #4 first — they unlock long-running task support which is the
 main gap between the current implementation and full production use.
