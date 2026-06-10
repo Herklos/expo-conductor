@@ -271,20 +271,41 @@ const subStyles = StyleSheet.create({
 
 type ModeOS = 'ios' | 'android' | 'web';
 
+// Modes are grouped in the selector by HOW they fire so the distinction is obvious:
+//  - 'oneshot'   fires once, soon after scheduling
+//  - 'recurring' repeats on an OS cadence (floored at ~15 min on native)
+//  - 'event'     fired by an external/system event, not a timer (push, app lifecycle)
+type TriggerGroup = 'oneshot' | 'recurring' | 'event';
+
+// Display order + section copy for each group (see TriggerSelector).
+export const TRIGGER_GROUPS: { id: TriggerGroup; title: string; caption: string }[] = [
+  { id: 'oneshot',   title: 'One-shot',   caption: 'Fires once, shortly after you schedule it' },
+  { id: 'recurring', title: 'Recurring',  caption: 'Repeats on an OS cadence (≥ 15 min on native)' },
+  { id: 'event',     title: 'External / event-driven', caption: 'Fired by a push or an app-lifecycle event — no timer' },
+];
+
 // `platforms` restricts a mode to the OSes that actually support it (per the README
 // availability matrix); omitted = available everywhere. `note` flags modes that don't
 // fire on a timer here and are run on demand with the ▶ button in the Lab — see the
-// caption in SystemHubScreen.
-export const TRIGGER_MODES: { id: TriggerMode; label: string; sub: string; note?: string; platforms?: ModeOS[] }[] = [
-  { id: 'interval',     label: 'Interval',      sub: 'recurrence trigger · periodic cadence' },
-  { id: 'alarm',        label: 'Exact Alarm',   sub: 'AlarmManager · precise timing' },
-  { id: 'notification', label: 'Notification',  sub: 'local notification delivery · one-shot' },
-  { id: 'time',         label: 'Time',          sub: 'one-shot · fires 10 s after scheduling' },
-  { id: 'background',   label: 'Background',    sub: 'WorkManager · BGTaskScheduler · deferrable', note: 'OS-timed' },
-  { id: 'appState',     label: 'App State',     sub: 'fires on foreground transition' },
+// caption in SystemHubScreen. `group` buckets the mode in the selector (see TriggerGroup).
+export const TRIGGER_MODES: { id: TriggerMode; label: string; sub: string; group: TriggerGroup; note?: string; platforms?: ModeOS[] }[] = [
+  { id: 'interval',     label: 'Interval',      sub: 'recurrence trigger · periodic cadence', group: 'recurring' },
+  { id: 'alarm',        label: 'Exact Alarm',   sub: 'AlarmManager · precise timing', group: 'recurring' },
+  { id: 'notification', label: 'Notification',  sub: 'local notification delivery · one-shot', group: 'oneshot' },
+  { id: 'time',         label: 'Time',          sub: 'one-shot · fires 10 s after scheduling', group: 'oneshot' },
+  { id: 'background',   label: 'Background',    sub: 'WorkManager · BGTaskScheduler · deferrable', group: 'recurring', note: 'OS-timed' },
+  { id: 'appState',     label: 'App State',     sub: 'fires on foreground transition', group: 'event' },
   // push: native only (no push delivery on web). continued task: iOS 26+ only.
-  { id: 'push',         label: 'Push',          sub: 'FCM · APNs remote message', note: 'native · ▶ simulates', platforms: ['ios', 'android'] },
-  { id: 'userInitiatedBackground', label: 'Continued Task', sub: 'BGContinuedProcessingTask', note: 'iOS 26', platforms: ['ios'] },
+  { id: 'push',         label: 'Push',          sub: 'FCM · APNs remote message', group: 'event', note: 'native · ▶ simulates', platforms: ['ios', 'android'] },
+  { id: 'userInitiatedBackground', label: 'Continued Task', sub: 'BGContinuedProcessingTask', group: 'oneshot', note: 'iOS 26', platforms: ['ios'] },
+  // Not a real `Trigger` — it's a `time` one-shot + `policy.foreground: true`, which promotes the
+  // WorkManager worker to a foreground service (Doze-safe, no 10-min CPU cap). One-shot, not
+  // recurrence: recurrence is floored at 15 min and skips the expedited-FGS path; a `time` trigger
+  // takes the one-time worker branch (~10s, expedited). The ongoing notification is OS-mandated and
+  // visible only WHILE the worker runs — i.e. on that scheduled fire, NOT the ▶ button (runNow
+  // dispatches inline, bypassing the worker). Pair with a heavy archetype so it lasts long enough
+  // to see. Android only.
+  { id: 'foregroundService', label: 'Foreground Service', sub: 'WorkManager FGS · fires ~10s after scheduling', group: 'oneshot', note: 'one-shot', platforms: ['android'] },
 ];
 
 export function TriggerSelector({
@@ -302,33 +323,44 @@ export function TriggerSelector({
   );
   return (
     <View style={ts.wrap}>
-      {modes.map((m) => {
-        const selected = m.id === value;
+      {TRIGGER_GROUPS.map((group) => {
+        // One section per group; skip a group emptied by the platform filter.
+        const groupModes = modes.filter((m) => m.group === group.id);
+        if (groupModes.length === 0) return null;
         return (
-          <Pressable
-            key={m.id}
-            style={[
-              ts.row,
-              {
-                borderColor: selected ? theme.accent : theme.border,
-                backgroundColor: selected ? theme.accentMuted : 'transparent',
-              },
-            ]}
-            onPress={() => onChange(m.id)}
-          >
-            <View style={[ts.radio, { borderColor: selected ? theme.accent : theme.muted }]}>
-              {selected && <View style={[ts.radioDot, { backgroundColor: theme.accent }]} />}
-            </View>
-            <View style={ts.textBlock}>
-              <Text style={[ts.lab, { color: selected ? theme.accent : theme.text }]}>{m.label}</Text>
-              <Text style={[ts.sub, { color: theme.muted, fontFamily: MONO }]}>{m.sub}</Text>
-            </View>
-            {m.note != null && (
-              <View style={[ts.note, { borderColor: theme.border, backgroundColor: theme.accentMuted }]}>
-                <Text style={[ts.noteText, { color: theme.muted }]}>{m.note}</Text>
-              </View>
-            )}
-          </Pressable>
+          <View key={group.id} style={ts.group}>
+            <Text style={[ts.groupTitle, { color: theme.text }]}>{group.title}</Text>
+            <Text style={[ts.groupCaption, { color: theme.muted }]}>{group.caption}</Text>
+            {groupModes.map((m) => {
+              const selected = m.id === value;
+              return (
+                <Pressable
+                  key={m.id}
+                  style={[
+                    ts.row,
+                    {
+                      borderColor: selected ? theme.accent : theme.border,
+                      backgroundColor: selected ? theme.accentMuted : 'transparent',
+                    },
+                  ]}
+                  onPress={() => onChange(m.id)}
+                >
+                  <View style={[ts.radio, { borderColor: selected ? theme.accent : theme.muted }]}>
+                    {selected && <View style={[ts.radioDot, { backgroundColor: theme.accent }]} />}
+                  </View>
+                  <View style={ts.textBlock}>
+                    <Text style={[ts.lab, { color: selected ? theme.accent : theme.text }]}>{m.label}</Text>
+                    <Text style={[ts.sub, { color: theme.muted, fontFamily: MONO }]}>{m.sub}</Text>
+                  </View>
+                  {m.note != null && (
+                    <View style={[ts.note, { borderColor: theme.border, backgroundColor: theme.accentMuted }]}>
+                      <Text style={[ts.noteText, { color: theme.muted }]}>{m.note}</Text>
+                    </View>
+                  )}
+                </Pressable>
+              );
+            })}
+          </View>
         );
       })}
     </View>
@@ -336,6 +368,9 @@ export function TriggerSelector({
 }
 const ts = StyleSheet.create({
   wrap: { gap: 4 },
+  group: { gap: 4, marginBottom: 10 },
+  groupTitle: { fontSize: 11, fontWeight: '800', letterSpacing: 1, textTransform: 'uppercase' },
+  groupCaption: { fontSize: 10, marginBottom: 2 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

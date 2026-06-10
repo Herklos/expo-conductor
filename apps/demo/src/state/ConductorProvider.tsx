@@ -24,7 +24,8 @@ export type TriggerMode =
   | 'background'
   | 'appState'
   | 'push'
-  | 'userInitiatedBackground';
+  | 'userInitiatedBackground'
+  | 'foregroundService';
 
 export interface ScheduleConfig {
   kind: 'interval' | 'daily' | 'weekly' | 'cron';

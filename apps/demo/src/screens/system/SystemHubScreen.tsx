@@ -30,6 +30,7 @@ const RUN_NOW_ONLY_NOTE: Partial<Record<TriggerMode, string>> = {
   push: 'Push tasks fire when your server sends a matching FCM/APNs data message — there is no local timer to wait on. Press ▶ on a scheduled task in the Lab to fire one now (by id, simulating a delivery — not real matchKey routing).',
   background: 'Background tasks are OS-timed (WorkManager / BGTaskScheduler) and won’t fire on a timer here. Press ▶ in the Lab to run one on demand.',
   userInitiatedBackground: 'Continued tasks need iOS 26 and must originate from a live user action. Press ▶ in the Lab to run one on demand here.',
+  foregroundService: 'Android only. A time one-shot + policy.foreground promotes the WorkManager worker to a foreground service ~10s after you schedule. The ongoing notification shows only WHILE that scheduled worker runs — the ▶ button dispatches inline and bypasses the worker, so it shows nothing. Pair with a heavy archetype (CPU / All) so the run lasts long enough to see it.',
 };
 
 export function SystemHubScreen() {

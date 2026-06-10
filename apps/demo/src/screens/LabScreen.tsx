@@ -207,6 +207,14 @@ export function LabScreen() {
         return [{ type: 'push', matchKey: taskId }, ...notifTrigger];
       case 'userInitiatedBackground':
         return [{ type: 'userInitiatedBackground' }, ...notifTrigger];
+      case 'foregroundService':
+        // Foreground service is a POLICY (set in scheduleActive), not a trigger. Back it with a
+        // `time` ONE-SHOT (~10s), NOT recurrence: recurrence routes through PeriodicWorkRequest,
+        // which is floored at 15 min AND skips the expedited-FGS path. A `time` trigger has no
+        // recurrence, so it takes the one-time OneTimeWorkRequest branch in the native
+        // schedule() — ~10s delay, expedited so the FGS can start under background restrictions,
+        // and ConductorWorker.setForeground shows the ongoing notification while the handler runs.
+        return [{ type: 'time', inSeconds: 10 }, ...notifTrigger];
       default: {
         const _exhaustive: never = triggerMode;
         return _exhaustive;
@@ -237,6 +245,10 @@ export function LabScreen() {
             priority: cell.priority,
             weight: cell.weight,
             policy: {
+              // Android-only: promote the WorkManager worker to a foreground service. No-op on
+              // iOS/Web (the native TaskMapper ignores unknown policy keys). See the
+              // 'foregroundService' TriggerMode in parts.tsx.
+              ...(triggerMode === 'foregroundService' ? { foreground: true } : {}),
               constraints: {
                 ...(cell.requiresCharging ? { requiresCharging: true } : {}),
                 ...(cell.requiresNetwork ? { network: 'any' as const } : {}),

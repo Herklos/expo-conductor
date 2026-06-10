@@ -38,10 +38,17 @@ These former roadmap items are now implemented and released — see the
 |15 | Core Bluetooth state restoration    | iOS           | BLE advertisement/connection wakeup       | 3–4 h    | P3       |
 |16 | URLSession background transfer      | iOS           | Transfer-completion wakeup                | 2–3 h    | P3       |
 |17 | HealthKit background delivery       | iOS           | Health-data-change wakeup                 | 3–4 h    | P3       |
+|19 | Live Activity progress surface²     | iOS           | Lock Screen / Dynamic Island task UI      | 7–11 h   | P3       |
 
 ¹ Foreground-service *promotion* for `policy.foreground` tasks already shipped in v0.4.0 (via
 WorkManager `setForeground`). Only the optional FCM-receive-path *direct* foreground-service start
 remains — low value, since WorkManager-promoted tasks already bypass Doze.
+
+² The iOS "equivalent" of the Android foreground-service notification — but a Live Activity is a UI
+surface only and grants **no** extra background runtime (unlike `policy.foreground`). Scoped as a
+`policy.liveActivity` flag paired with the existing `userInitiatedBackground` trigger, behind an
+`enableLiveActivities` config flag. Full design:
+[docs/plan-ios-live-activity.md](packages/expo-conductor/docs/plan-ios-live-activity.md).
 
 ---
 
