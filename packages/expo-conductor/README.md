@@ -77,7 +77,7 @@ complete example in `apps/demo/rust/` and `apps/demo/native-src/DemoHandlers.swi
 Enable in `app.json` with the matching `rustLibName` (must match your crate's `[lib] name`):
 
 ```json
-["expo-conductor", {
+["@drakkar.software/expo-conductor", {
   "enableRust": true,
   "rustLibName": "my_app_rust"
 }]
@@ -137,7 +137,7 @@ and `push` triggers it is **advisory** — the OS decides timing, not the schedu
 
 See the [full documentation](../../README.md) for triggers, policy/weight/priority, the
 config plugin options (`enableFcm`, `enablePush`, `enableExactAlarms`, `useExactAlarmClock`,
-`backgroundTaskIdentifiers`, `enableRust`, `enableForegroundService`), platform support matrix, and the device test guide.
+`backgroundTaskIdentifiers`, `enableRust`, `rustLibName`, `enableForegroundService`), platform support matrix, and the device test guide.
 
 ## Scripts
 

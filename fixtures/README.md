@@ -19,6 +19,12 @@ is `0.30000000000000004` everywhere, so it consistently exceeds a `0.3` budget).
 | `priority.cases.json` | priority vs other tasks | `Priority.order(tasks) -> id[]` |
 | `weight-admission.cases.json` | task weight / resource budget | `Weight.admit(budget, tasks) -> {admitted, deferred}` |
 | `policy.cases.json` | execution policy / constraints | `Policy.evaluate(constraints, context) -> {eligible, reason}` |
+| `notification.cases.json` | next-run selection / re-fire (TS-only) | `computeNextRunAt(task, now)` |
+
+> **`notification.cases.json` is TypeScript-only.** Unlike the four engine fixtures above, it
+> exercises `computeNextRunAt` in the `normalize` layer *above* the shared engine (winning-trigger
+> selection, recurring re-fire, `futureOnly`), so it is loaded by the Jest suite
+> (`src/__tests__/notification.test.ts`) but has no Kotlin/Swift port.
 
 ## Conventions
 

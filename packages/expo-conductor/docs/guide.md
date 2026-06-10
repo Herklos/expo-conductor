@@ -55,7 +55,7 @@ engine routes to the native layer; absent the native handler it falls through to
 ## Installation & config plugin
 
 ```sh
-npx expo install expo-conductor
+npx expo install @drakkar.software/expo-conductor
 ```
 
 Add to `app.json` — the plugin wires Android permissions, FCM service, iOS background modes,
@@ -65,7 +65,7 @@ BGTask identifiers, and exact-alarm flags:
 {
   "expo": {
     "plugins": [
-      ["expo-conductor", {
+      ["@drakkar.software/expo-conductor", {
         "enableExactAlarms":       true,
         "enableFcm":               false,
         "enableForegroundService": false,
@@ -256,9 +256,11 @@ Service — it re-wraps `data` and `conductorTask` won't be at the top level.
 Use `apns-push-type: background` and `apns-priority: 5`. Background push is throttled
 (~2–3/hr) and not guaranteed.
 
-**FCM Doze-bypass foreground service (Android, v0.4.0+):** set `policy.foreground: true` and
-`enableForegroundService: true` in the config plugin. When an FCM push matches the task,
-Android starts a foreground service instead of a WorkManager job, bypassing Doze entirely.
+**Foreground-service promotion (Android, v0.4.0+):** set `policy.foreground: true` and
+`enableForegroundService: true` in the config plugin. The task's `ConductorWorker` WorkManager job
+promotes itself to a foreground service via `setForeground(...)` (dataSync), so it is exempt from
+Doze and the background-CPU cap while it runs. WorkManager supplies the service — no app-declared
+`<service>` is needed.
 
 **Silent APNs → BGProcessingTask chain (iOS, v0.4.0+):** combine a `push` trigger with a
 `background` trigger that has `bgProcessing: true`. A silent APNs push matching the `matchKey`
@@ -499,6 +501,7 @@ await Conductor.defineTaskDefinition(def)     // register definition (handler se
 await Conductor.cancelTask(id)                // remove a task
 await Conductor.getTasks()                    // RegisteredTask[] — all stored tasks
 await Conductor.runNow(id)                    // fire immediately (bypasses policy/budget)
+await Conductor.runDueTasks()                 // run all currently-due tasks; returns count fired
 
 // Runtime control
 await Conductor.setResourceBudget(budget)     // { cpu, network, battery, memory } each 0..1
@@ -516,7 +519,9 @@ Conductor.addListener('onTaskExecute',  cb)   // { taskId, triggerType, firedBy,
 Conductor.addListener('onTaskComplete', cb)   // adds: result
 Conductor.addListener('onTaskSkipped',  cb)   // { taskId, reason }
 Conductor.addListener('onTaskError',    cb)   // adds: error
-Conductor.removeAllListeners(eventName)
+
+const sub = Conductor.addListener('onTaskExecute', cb)
+sub.remove()                                  // detach a single listener (there is no removeAllListeners)
 ```
 
 ### `RegisteredTask` (from `getTasks()`)
@@ -546,7 +551,7 @@ durable storage (Android: `SharedPreferences`; iOS: `UserDefaults`; Web: `localS
 Background/headless runs are captured because the write happens from the main-thread emit helper.
 
 ```ts
-import { foldHistory, reconcile } from 'expo-conductor';
+import { foldHistory, reconcile } from '@drakkar.software/expo-conductor';
 
 // Fold raw events into paired records
 const records = foldHistory(await Conductor.getHistory());
@@ -569,12 +574,13 @@ For `background`, `push`, `appState` it is **advisory** — OS timing is non-det
 ## Config plugin options
 
 ```jsonc
-["expo-conductor", {
+["@drakkar.software/expo-conductor", {
   // Permissions & features
   "enableExactAlarms":        true,   // SCHEDULE_EXACT_ALARM permission (Android 12+)
   "useExactAlarmClock":       false,  // USE_EXACT_ALARM — Play-restricted, opt in only if eligible
   "enableFcm":                false,  // Firebase FCM service + gradle dependency
-  "enableForegroundService":  false,  // FOREGROUND_SERVICE(_DATA_SYNC) + service declaration
+  "enablePush":               false,  // iOS remote-notification background mode (APNs, no Firebase)
+  "enableForegroundService":  false,  // FOREGROUND_SERVICE(_DATA_SYNC) permissions for policy.foreground
   "enableRust":               false,  // CONDUCTOR_RUST xcconfig + rustLibName in build
 
   // iOS background task identifiers (added to BGTaskSchedulerPermittedIdentifiers)
@@ -588,10 +594,11 @@ For `background`, `push`, `appState` it is **advisory** — OS timing is non-det
 
 | Option | Platform | Default | Notes |
 | --- | --- | --- | --- |
-| `enableExactAlarms` | Android | `false` | Adds `SCHEDULE_EXACT_ALARM` |
+| `enableExactAlarms` | Android | `true` | Adds `SCHEDULE_EXACT_ALARM` (falls back to inexact if not granted) |
 | `useExactAlarmClock` | Android | `false` | Adds `USE_EXACT_ALARM`; Play-restricted |
 | `enableFcm` | Android | `false` | Firebase messaging; add `google-services.json` |
-| `enableForegroundService` | Android | `false` | For FCM Doze-bypass + `policy.foreground` |
+| `enablePush` | iOS | `false` | `remote-notification` background mode for APNs-only push (implied by `enableFcm`) |
+| `enableForegroundService` | Android | `false` | `FOREGROUND_SERVICE` permissions for `policy.foreground` |
 | `enableRust` | iOS + Android | `false` | C ABI Rust handler bridge |
 | `rustLibName` | iOS + Android | `""` | Your crate's `[lib] name` |
 | `backgroundTaskIdentifiers` | iOS | `[]` | Extra BGTask ids to declare |
@@ -606,8 +613,8 @@ For `background`, `push`, `appState` it is **advisory** — OS timing is non-det
   FCM + foreground service.
 - Exact alarms → `AlarmManager`. Require `SCHEDULE_EXACT_ALARM` (user-revocable on Android 14+).
 - `windowMs` on `alarm` → `AlarmManager.setWindow` for battery-efficient batching.
-- `policy.foreground: true` → WorkManager `ForegroundInfo` (dataSync type). With FCM, starts
-  `ConductorForegroundService` instead, bypassing Doze entirely.
+- `policy.foreground: true` → `ConductorWorker` promotes its WorkManager job to a foreground
+  service via `setForeground(ForegroundInfo)` (dataSync type), exempt from Doze while it runs.
 - Notifications → `NotificationManagerCompat` with an auto-created channel.
 - `push` trigger → `FirebaseMessagingService.onMessageReceived`. Requires `enableFcm: true`.
 - History → `SharedPreferences` JSON ring buffer.
@@ -648,8 +655,8 @@ npx expo install expo-task-manager expo-background-task
 
 ```ts
 // app entry — MODULE scope
-import Conductor, { TaskResult } from 'expo-conductor';
-import { registerConductorBackgroundTask } from 'expo-conductor/task-manager';
+import Conductor, { TaskResult } from '@drakkar.software/expo-conductor';
+import { registerConductorBackgroundTask } from '@drakkar.software/expo-conductor/task-manager';
 
 Conductor.defineTask('refresh', async () => TaskResult.NEW_DATA);
 await registerConductorBackgroundTask({ minimumInterval: 15 }); // minutes
@@ -665,7 +672,7 @@ npx expo install expo-notifications
 ```
 
 ```ts
-import { setupConductorNotifications } from 'expo-conductor/notifications';
+import { setupConductorNotifications } from '@drakkar.software/expo-conductor/notifications';
 await setupConductorNotifications(); // foreground handler + Android channel + response routing
 ```
 

@@ -5,15 +5,28 @@ to change across native code, types, and the config plugin.
 
 ---
 
+## ✅ Shipped in v0.4.0
+
+These former roadmap items are now implemented and released — see the
+[CHANGELOG](packages/expo-conductor/CHANGELOG.md):
+
+- **#3 Windowed exact alarm** — `AlarmTrigger.windowMs` → `AlarmManager.setWindow`.
+- **#5 Silent APNs → BGProcessingTask chain** — a silent push with `bgProcessing: true` submits a
+  `BGProcessingTaskRequest`.
+- **#6 Recurring notification trigger** — `NotificationTrigger.recurring` re-arms after each delivery.
+- **#18 BGContinuedProcessingTask (iOS 26+)** — `type: 'userInitiatedBackground'`.
+- **#2 (partial) foreground-service promotion** — `policy.foreground: true` promotes a `ConductorWorker`
+  WorkManager job to a foreground service via `setForeground(...)` (needs `enableForegroundService`).
+  The originally-scoped *FCM-message-path direct* foreground-service start was **not** built — the FCM
+  receive path dispatches normally (see #2 below).
+
+---
+
 ## Priority summary
 
 | # | Feature                             | Platform      | Impact                                    | Effort   | Priority |
 |---|-------------------------------------|---------------|-------------------------------------------|----------|----------|
-| 5 | APNs → BGProcessingTask chain       | iOS           | Near-real-time background                 | 2 h      | P2       |
-| 6 | Recurring notification trigger      | All platforms | Repeating notification-driven cadence     | 3–4 h    | P2       |
-| 2 | FCM Doze bypass (foreground svc)    | Android       | Doze-proof FCM tasks                      | 1 h      | P2       |
-| 3 | Windowed exact alarm                | Android       | Battery-friendly timing                   | 30 min   | P2       |
-|18 | BGContinuedProcessingTask (iOS 26+) | iOS           | User-initiated long-running background    | 2–3 h    | P2       |
+| 2 | FCM push-path foreground start¹     | Android       | Doze-proof FCM tasks (remainder)          | 1 h      | P3       |
 | 7 | System broadcast triggers           | Android       | Charging/BT/USB/locale event tasks        | 2–3 h    | P3       |
 | 8 | Geofence trigger                    | Android       | Location-boundary task firing             | 3–4 h    | P3       |
 | 9 | Activity Recognition transitions    | Android       | Motion-state task firing                  | 2–3 h    | P3       |
@@ -26,57 +39,34 @@ to change across native code, types, and the config plugin.
 |16 | URLSession background transfer      | iOS           | Transfer-completion wakeup                | 2–3 h    | P3       |
 |17 | HealthKit background delivery       | iOS           | Health-data-change wakeup                 | 3–4 h    | P3       |
 
+¹ Foreground-service *promotion* for `policy.foreground` tasks already shipped in v0.4.0 (via
+WorkManager `setForeground`). Only the optional FCM-receive-path *direct* foreground-service start
+remains — low value, since WorkManager-promoted tasks already bypass Doze.
+
 ---
 
 ## Android
 
 ### 2. Doze-mode High-Priority FCM Bypass
 
-**What:** FCM high-priority messages bypass Doze mode entirely. Extend
-`ConductorFcmService` so that when the matched task has `policy.foreground: true`,
-it starts a foreground service directly instead of enqueuing a WorkManager job.
-This ensures the task fires immediately regardless of Doze state.
+**Status (v0.4.0):** *Foreground-service promotion is shipped.* A task with `policy.foreground: true`
+runs as a `ConductorWorker` WorkManager job that promotes itself to a foreground service via
+`setForeground(ForegroundInfo)` (dataSync), exempt from Doze while it runs. Enable with
+`enableForegroundService: true` (adds the `FOREGROUND_SERVICE` permissions; WorkManager supplies the
+service, so no app-declared `<service>` is needed). The real FCM service class is
+`ConductorMessagingService` — there is no `ConductorFcmService` / `ConductorForegroundService`.
 
-**Native work:**
-
-`ConductorFcmService.kt`
-- After matching the task, check `TaskMapper.isForeground(task)`
-- If true, start a `ForegroundServiceTaskRunner` via `startForegroundService()`
-  instead of `WorkManager.enqueueUniqueWork()`
-
-New `ForegroundServiceTaskRunner.kt`
-- `IntentService` subclass: calls `ExpoConductorModule.dispatchHeadless()` then
-  stops itself
-
-**Effort:** ~1 h (requires FCM already wired)  
-**Priority:** P2
+**Remaining (optional, P3):** have the FCM *receive* path
+(`ConductorMessagingService.handleRemoteData`) start a foreground service *directly* on receipt
+instead of dispatching in-process, for push-woken tasks that don't run through `ConductorWorker`.
+Low value — WorkManager-promoted tasks already bypass Doze — so deferred.
 
 ---
 
 ### 3. Windowed Exact Alarm
 
-**What:** `setWindow(triggerAtMs, windowLengthMs, pendingIntent)` is less precise
-than `setExact` but gentler on battery. Useful when "fire within the next 5 minutes
-of this time" is acceptable.
-
-**API surface:**
-```ts
-interface AlarmTrigger {
-  type: 'alarm';
-  at: number;
-  allowWhileIdle?: boolean;
-  windowMs?: number;   // NEW — if set, uses setWindow instead of setExact
-}
-```
-
-**Native work:**
-
-`ConductorAlarmReceiver.kt`
-- In `schedule()`, if `windowMs > 0` use `alarmManager.setWindow(...)` instead of
-  `setExact` / `setExactAndAllowWhileIdle`
-
-**Effort:** ~30 min  
-**Priority:** P2
+✅ **Shipped in v0.4.0.** `AlarmTrigger.windowMs` → `AlarmManager.setWindow` in
+`ConductorAlarmReceiver.schedule()`. See the [CHANGELOG](packages/expo-conductor/CHANGELOG.md).
 
 ---
 
@@ -221,27 +211,10 @@ interface AlarmTrigger {
 
 ### 5. Silent APNs Push → BGProcessingTask Chain
 
-**What:** An APNs push with `content-available: 1` and no visible alert wakes the
-app silently in the background. Extend `NotificationDelegate` to detect this and
-immediately submit a `BGProcessingTaskRequest` with `earliestBeginDate = .now`, so
-the task runs as soon as the OS allows — giving near-real-time background execution
-without maintaining a persistent connection.
-
-**API surface:** No new fields needed. If a task has `triggers: [{ type: 'push', matchKey: '...' }]` and `bgProcessing: true`, the push both matches the task AND
-schedules the BGProcessingTask.
-
-**Native work:**
-
-`ConductorAppDelegate.swift` (NotificationDelegate path)
-- In `userNotificationCenter(_:didReceive:)`, detect `content-available: 1` with
-  no `alert`
-- Match to a registered task via `matchKey`
-- If the task has `bgProcessing: true`, call
-  `BGTaskScheduler.shared.submit(BGProcessingTaskRequest(...))`
-
-**Effort:** ~2 h  
-**Depends on:** BGProcessingTask (#4)  
-**Priority:** P2
+✅ **Shipped in v0.4.0.** A silent push (`content-available: 1`, no alert) matching a `push` trigger
+with `bgProcessing: true` submits a `BGProcessingTaskRequest`. Implemented in
+`ConductorAppDelegate.swift` on the `application(_:didReceiveRemoteNotification:)` path (not the
+`didReceive` display path). See the [CHANGELOG](packages/expo-conductor/CHANGELOG.md).
 
 ---
 
@@ -398,25 +371,10 @@ schedules the BGProcessingTask.
 
 ### 18. BGContinuedProcessingTask (iOS 26+)
 
-**What:** New `BGTaskScheduler` task type from WWDC 2025. Allows a task that was initiated by a user action (button tap) to continue running in the background after the user backgrounds the app. Progress is shown in system UI; user can cancel.
-
-**API surface:**
-```ts
-{ type: 'userInitiatedBackground' }  // must be called from a user-action handler
-```
-
-**Native work:**
-
-`ConductorAppDelegate.swift`
-- Register `BGContinuedProcessingTask` identifier in `didFinishLaunching`
-
-New `ConductorBGContinuedHandler.swift`
-- Called from a foreground user-action path; suspends into background via `BGContinuedProcessingTaskRequest`
-
-**Constraints:** Must originate from explicit user action — cannot be autonomously scheduled. iOS/iPadOS 26+ only (2025 devices).
-
-**Effort:** ~2–3 h  
-**Priority:** P2 (future — target iOS 26)
+✅ **Shipped in v0.4.0.** `ContinuedProcessingTrigger` (`type: 'userInitiatedBackground'`); the
+`software.drakkar.expoconductor.continued` identifier is registered in `Schedulers.swift` and the
+config plugin permits it. Must originate from a user action; iOS 26+ only. See the
+[CHANGELOG](packages/expo-conductor/CHANGELOG.md).
 
 ---
 
@@ -424,61 +382,8 @@ New `ConductorBGContinuedHandler.swift`
 
 ### 6. Recurring Notification Trigger
 
-**What:** Today a `notification` trigger is strictly one-shot — the `inSeconds`/`at`
-offset is resolved to a fixed timestamp at registration, and `futureTriggers()` drops
-it after delivery. To fire repeatedly via notification delivery, users must currently
-pair a `notification` trigger with a `recurrence` trigger, which fires a timer rather
-than a notification.
-
-Goal: let a `notification` trigger self-reschedule by re-computing `now + inSeconds`
-after each delivery and posting a new local notification to the OS.
-
-**API surface:**
-```ts
-interface NotificationTrigger {
-  type: 'notification';
-  title: string;
-  body?: string;
-  inSeconds?: number;   // existing
-  at?: number;          // existing
-  runInBackground?: boolean;
-  recurring?: boolean;  // NEW — re-schedules itself after each delivery
-}
-```
-
-When `recurring: true` and `inSeconds` is set, the engine re-schedules a new
-notification with the same `inSeconds` offset after each fire, effectively creating
-a repeating notification-driven cadence.
-
-**Web engine work:**
-
-`normalize.ts` / `computeNextRunAt`
-- When `trigger.recurring && trigger.inSeconds != null`, treat the trigger as
-  recurrent: re-derive `nextRunAt = now + inSeconds * 1000` in `reschedule()`
-  instead of dropping it via `futureTriggers()`
-
-`WebSchedulerEngine.ts` — `futureTriggers()`
-- Preserve recurring notification triggers regardless of their `at` value so
-  `reschedule()` can recompute the next fire time
-
-**Native work:**
-
-Android — `ConductorNotificationReceiver.kt`
-- After the notification fires and `dispatch()` completes, if the task's notification
-  trigger has `recurring: true`, re-schedule a new `AlarmManager` exact alarm for
-  `now + inSeconds * 1000` and post a new `NotificationCompat` notification for it
-
-iOS — `ConductorAppDelegate.swift` (NotificationDelegate path)
-- After `didReceive` dispatches the task, if `recurring: true`, call
-  `UNUserNotificationCenter.add(UNNotificationRequest(...))` with a new
-  `UNTimeIntervalNotificationTrigger(timeInterval: inSeconds, repeats: false)`
-  (set `repeats: false` and re-arm manually so the recurrence interval is
-  re-evaluated each time, consistent with the engine)
-
-**Fixture work:**
-- Add `recurring-notification.cases.json` (or extend `recurrence.cases.json`) to
-  cover the re-arm timing and cross-platform identity
-
-**Effort:** ~3–4 h (web: ~1 h; Android: ~1–1.5 h; iOS: ~1–1.5 h)  
-**Priority:** P2
+✅ **Shipped in v0.4.0.** `NotificationTrigger.recurring?: boolean` — when `true` and `inSeconds` is
+set, the engine re-derives `now + inSeconds * 1000` and re-arms after each delivery (re-arm logic in
+`TaskMapper` on each platform; clock drift does not accumulate). See the
+[CHANGELOG](packages/expo-conductor/CHANGELOG.md).
 

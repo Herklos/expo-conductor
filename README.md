@@ -23,8 +23,8 @@ each task actually runs, using one shared, heavily-tested decision engine.
   instead of everything firing at once.
 - **Many triggers, one model.** `time`, `recurrence` (interval / daily / weekly / cron),
   `notification`, exact `alarm`, deferrable `background`, `push` (FCM / APNs), and `appState`.
-- **JS *or* native handlers.** Run work in JS while the app is alive, or in a native handler that
-  survives a headless cold start.
+- **JS, native, *or* Rust handlers.** Run work in JS while the app is alive, or in a native or
+  Rust handler that survives a headless cold start.
 - **Single-flight across instances.** Elect one leader so two browser tabs (or a tab + an
   Electron shell) don't double-fire the same recurring job.
 - **Batteries included.** An Expo config plugin wires permissions, the FCM service, BGTask
@@ -32,7 +32,7 @@ each task actually runs, using one shared, heavily-tested decision engine.
   `expo-notifications` extend it further.
 
 ```ts
-import Conductor, { Priority, TaskResult } from 'expo-conductor';
+import Conductor, { Priority, TaskResult } from '@drakkar.software/expo-conductor';
 
 // 1. Define the work (JS handler — or implement it natively, see below).
 Conductor.defineTask('refresh-feed', async (ctx) => {
@@ -76,7 +76,7 @@ What the engine can actually *do*, though, depends on the OS underneath it.
 | --- | :---: | :---: | :---: |
 | One-shot & recurring schedules (interval / daily / weekly / cron) | ✅ | ✅ | ✅ |
 | Run while the app is alive (JS handler) | ✅ | ✅ | ✅ |
-| Run **after the app is terminated** (native handler) | ✅ | ✅ | ❌ |
+| Run **after the app is terminated** (native / Rust handler) | ✅ | ✅ | ❌ |
 | Deferrable background execution | ✅ | ✅ ¹ | ⚠️ ² |
 | Long-running background task (~30 min, BGProcessingTask) | ➖ | ✅ ¹ | ➖ |
 | User-initiated continued background task (iOS 26+) | ➖ | ✅ ⁵ | ➖ |
@@ -104,7 +104,7 @@ The OS primitive behind each trigger is in the [Triggers](#triggers) table; see
 ## Installation
 
 ```sh
-npx expo install expo-conductor
+npx expo install @drakkar.software/expo-conductor
 ```
 
 Then add the config plugin to `app.json` — it sets up the Android permissions and FCM service, the
@@ -114,11 +114,16 @@ iOS background modes and BGTask identifiers, and the exact-alarm flags for you:
 {
   "expo": {
     "plugins": [
-      ["expo-conductor", { "enableExactAlarms": true, "enableFcm": false }]
+      ["@drakkar.software/expo-conductor", { "enableExactAlarms": true, "enableFcm": false }]
     ]
   }
 }
 ```
+
+Other plugin options: `enablePush` (iOS APNs background mode without Firebase),
+`enableForegroundService` (Android `policy.foreground` foreground-service promotion),
+`enableRust` / `rustLibName` (Rust handlers — see below), `useExactAlarmClock`, and
+`backgroundTaskIdentifiers`.
 
 `expo-conductor` ships native code, so it needs a [development build](https://docs.expo.dev/develop/development-builds/introduction/)
 (or a bare/prebuilt project) — it won't run in Expo Go.
@@ -253,10 +258,11 @@ await Conductor.schedule({
 Intended for recurring / `appState` work. A one-shot `time`/`alarm` that fires while this
 instance is a non-leader is skipped and **not** replayed on handoff.
 
-### Task handlers — JS *or* native
+### Task handlers — JS, native, or Rust
 
-A task's work can run as a **JS handler** or an **app-provided native handler**. JS is the easy
-path; a native handler is the reliable path for work that must run while the app is terminated.
+A task's work can run as a **JS handler**, an **app-provided native handler**, or a **Rust handler**.
+JS is the easy path; a native or Rust handler is the reliable path for work that must run while the
+app is terminated.
 
 ```ts
 // JS handler — register at MODULE (global) scope, not inside a component/effect, so it
@@ -300,6 +306,29 @@ fire time (e.g. the process was killed) and a native handler with the same name 
 engine uses the native one. Native handlers should return quickly and respect background
 execution limits — for long work, kick off your own bounded task and return promptly.
 
+#### Rust handlers
+
+For shared, portable logic a task can run a **Rust handler** (`handler: { name, type: 'rust' }`) —
+a function registered with `conductor_register` in the `conductor_ffi` glue crate. Like a native
+handler it runs on the native side (headless included) with no JS runtime involved:
+
+```rust
+// src/lib.rs — your app's Rust crate (depends on conductor_ffi)
+use conductor_ffi::conductor_register;
+use std::sync::Arc;
+
+#[no_mangle]
+pub extern "C" fn conductor_app_init() {
+    conductor_register("refresh-feed", Arc::new(|_task_id, _data| "success"));
+}
+```
+
+Enable it with `enableRust: true` (and `rustLibName` to match your crate's `[lib] name`) in the
+config plugin. On Android the lib calls `conductor_app_init()` when the `.so` loads; on iOS call
+`ConductorRustBridge.appInit()` from your AppDelegate. See the
+[package README](packages/expo-conductor/README.md#rust-handlers) for the full crate + build setup,
+and `apps/demo/rust/` for a working example.
+
 ## API
 
 The default export is a ready-to-use singleton bound to the platform backend (native module on
@@ -307,7 +336,7 @@ iOS/Android, Web engine on web). Advanced consumers can construct their own `Con
 a custom backend.
 
 ```ts
-import Conductor from 'expo-conductor';
+import Conductor from '@drakkar.software/expo-conductor';
 
 // Handler registration
 Conductor.defineTask(name, handler)          // register a JS handler (call at module scope!)
@@ -321,6 +350,7 @@ await Conductor.defineTaskDefinition(def)    // register a definition (handler r
 await Conductor.cancelTask(id)
 await Conductor.getTasks()                   // RegisteredTask[]
 await Conductor.runNow(id)                   // fire immediately, bypassing policy/budget
+await Conductor.runDueTasks()                // run all currently-due tasks through the engine; returns count fired
 
 // Runtime control
 await Conductor.setResourceBudget(budget)    // { cpu, network, battery, memory } each 0..1
@@ -343,18 +373,23 @@ Conductor.addListener('onTaskError',    (p) => {})  // adds: error
 #### `foldHistory` and `reconcile`
 
 ```ts
-import { foldHistory, reconcile } from 'expo-conductor';
+import { foldHistory, reconcile } from '@drakkar.software/expo-conductor';
 
 // Fold raw events into paired records { taskId, firedAt, firedBy, result, durationMs, … }
 const records = foldHistory(await Conductor.getHistory());
 
-// Compare expected vs actual — exact for time/recurrence/alarm, advisory for background/push
+// Compare expected vs actual — exact for time/recurrence/alarm, advisory for background/push/appState
 const tasks = await Conductor.getTasks();
 const { matched, missed, unexpected, aborted } = reconcile(tasks, records, {
   now: Date.now(),
   windowMs: 24 * 60 * 60_000,   // look-back window
 });
 ```
+
+Also exported: `expectedOccurrences` (a task's expected fire times), `DEFAULT_TOLERANCE_MS` and
+`DEFAULT_WINDOW_MS` (the reconcile match-tolerance / look-back defaults), the `ReconcileResult`,
+`ReconcileOptions`, `ExpectedOccurrence` and `MatchedOccurrence` types, and `backend` (the resolved
+platform backend, for advanced consumers constructing a custom `ConductorClient`).
 
 ## Optional first-party integrations
 
@@ -374,8 +409,8 @@ npx expo install expo-task-manager expo-background-task
 
 ```ts
 // app entry — MODULE scope (not inside a component)
-import Conductor, { TaskResult } from 'expo-conductor';
-import { registerConductorBackgroundTask } from 'expo-conductor/task-manager';
+import Conductor, { TaskResult } from '@drakkar.software/expo-conductor';
+import { registerConductorBackgroundTask } from '@drakkar.software/expo-conductor/task-manager';
 
 Conductor.defineTask('refresh', async () => TaskResult.SUCCESS);
 await registerConductorBackgroundTask({ minimumInterval: 15 }); // minutes (Android floor: 15)
@@ -400,7 +435,7 @@ npx expo install expo-notifications
 ```
 
 ```ts
-import { setupConductorNotifications } from 'expo-conductor/notifications';
+import { setupConductorNotifications } from '@drakkar.software/expo-conductor/notifications';
 
 await setupConductorNotifications(); // foreground handler + Android channel + response routing
 ```
@@ -452,6 +487,8 @@ The `push` trigger only matches tasks that declare a `push` trigger with a match
   ```
   Background push is throttled by iOS (~2–3/hr) and not guaranteed — don't use it for
   time-critical or high-frequency work. The `aps` envelope is stripped before handler `data`.
+  Enable the iOS `remote-notification` background mode with `enablePush: true` in the config
+  plugin (an APNs-only setup needs no Firebase; `enableFcm: true` implies it).
 - A push task that must run while the app is **terminated** needs a **native** handler
   (`handler.type: 'native'`); a JS handler only runs while the app is alive. Treat all push
   `data` as untrusted input.
@@ -511,6 +548,8 @@ The engine is verified the same way on every platform — the *same* fixtures, t
 | TS engine + orchestration + API (Jest) | `pnpm --filter expo-conductor test` | anywhere with Node |
 | Kotlin engine (JUnit, shared fixtures) | `pnpm test:kotlin` | JDK 17+ (CI uses 21) |
 | Swift engine (XCTest, shared fixtures) | `pnpm test:swift` | macOS / Swift toolchain |
+| Rust glue crate (`conductor_ffi`) | `pnpm test:rust` | Rust toolchain (no NDK) |
+| Demo Rust crate (archetype handlers) | `pnpm test:rust:demo` | Rust toolchain (no NDK) |
 
 The Kotlin and Swift engine tests use standalone JVM-Gradle and SwiftPM harnesses, so
 they run **without** an Android emulator or Xcode project — they compile only the pure
@@ -536,7 +575,7 @@ To exercise OS-level background behavior on a device:
 - **Android exact alarm:** schedule “Exact alarm in 10s”, lock the device, observe it fire.
   Inspect with `adb shell dumpsys alarm`.
 - **iOS background refresh:** run from Xcode, pause in the debugger and call
-  `e -l objc -- (void)[[BGTaskScheduler sharedScheduler] _simulateLaunchForTaskWithIdentifier:@"com.expoconductor.refresh"]`.
+  `e -l objc -- (void)[[BGTaskScheduler sharedScheduler] _simulateLaunchForTaskWithIdentifier:@"software.drakkar.expoconductor.refresh"]`.
 - **Notifications:** schedule “Notification in 5s”, background the app, observe delivery.
 - **Push (FCM):** enable FCM in the plugin, send a **raw FCM v1 data-only** message (see
   the Push message format section above — not via the Expo Push Service, which re-wraps data).
