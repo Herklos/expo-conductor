@@ -9,7 +9,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import Conductor from 'expo-conductor';
 import { useTheme } from '../../theme';
-import { useConductor } from '../../state/ConductorProvider';
+import { useConductor, type TriggerMode } from '../../state/ConductorProvider';
 import {
   Banner,
   Btn,
@@ -22,6 +22,15 @@ import {
   fmtDateTime,
   useOp,
 } from './parts';
+
+// Modes that don't fire on a timer on every platform — the Lab's ▶ run button fires them
+// on demand. Wording is deliberately honest: runNow fires a task by id, it does NOT exercise
+// the real push matchKey route or the native OS scheduler.
+const RUN_NOW_ONLY_NOTE: Partial<Record<TriggerMode, string>> = {
+  push: 'Push tasks fire when a matching FCM/APNs message arrives. There is no push on web — press ▶ on a scheduled task in the Lab to fire it as if a matching message arrived (fires by id, not real matchKey routing).',
+  background: 'Background tasks are OS-timed (WorkManager / BGTaskScheduler) and won’t fire on a timer here. Press ▶ in the Lab to run one on demand.',
+  userInitiatedBackground: 'Continued tasks need iOS 26 and a live user action; elsewhere it is a no-op. Press ▶ in the Lab to run on demand.',
+};
 
 export function SystemHubScreen() {
   const theme = useTheme();
@@ -80,17 +89,22 @@ export function SystemHubScreen() {
         {/* ── Trigger type ── */}
         <Section
           title="TRIGGER TYPE"
-          desc="How tasks are scheduled when you press 'Schedule active' in the Lab — WorkManager, exact-alarm, or notification-linked delivery."
+          desc="How 'Schedule active' in the Lab wires each task. Event- and OS-driven modes don't fire on a timer — use the ▶ run button in the Lab to fire them on demand."
           theme={theme}
         >
           <TriggerSelector value={triggerMode} onChange={setTriggerMode} theme={theme} />
+          {RUN_NOW_ONLY_NOTE[triggerMode] != null && (
+            <View style={[s.triggerNote, { borderColor: theme.border, backgroundColor: theme.accentMuted }]}>
+              <Text style={[s.triggerNoteText, { color: theme.muted }]}>{RUN_NOW_ONLY_NOTE[triggerMode]}</Text>
+            </View>
+          )}
         </Section>
 
-        {/* ── Schedule ── */}
-        {triggerMode !== 'notification' && (
+        {/* ── Schedule (recurrence cadence — only the recurrence-driven modes use it) ── */}
+        {(triggerMode === 'interval' || triggerMode === 'alarm') && (
           <Section
             title="SCHEDULE"
-            desc="Recurrence cadence used when 'Schedule active' runs. The notification trigger uses a fixed 10s one-shot."
+            desc="Recurrence cadence for Interval and the recurrence leg of Exact Alarm. One-shot and event modes ignore it."
             theme={theme}
           >
             <ScheduleSelector value={scheduleConfig} onChange={setScheduleConfig} theme={theme} />
@@ -220,4 +234,13 @@ const s = StyleSheet.create({
   statL: { fontSize: 8, fontWeight: '800', letterSpacing: 1.5, marginTop: 2 },
 
   btnRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+
+  triggerNote: {
+    marginTop: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 7,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  triggerNoteText: { fontSize: 11, lineHeight: 16 },
 });

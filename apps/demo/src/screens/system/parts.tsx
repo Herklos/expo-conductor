@@ -269,10 +269,17 @@ const subStyles = StyleSheet.create({
 
 // ─── Trigger mode selector ────────────────────────────────────────────────────
 
-export const TRIGGER_MODES: { id: TriggerMode; label: string; sub: string }[] = [
-  { id: 'interval',     label: 'Interval',     sub: 'WorkManager · recurrence trigger' },
-  { id: 'alarm',        label: 'Exact Alarm',  sub: 'AlarmManager · precise timing' },
-  { id: 'notification', label: 'Notification', sub: 'Local notification delivery · one-shot' },
+// `note` flags modes that don't fire on a timer here (web / cross-platform) and are
+// fired on demand with the ▶ run button in the Lab — see the caption in SystemHubScreen.
+export const TRIGGER_MODES: { id: TriggerMode; label: string; sub: string; note?: string }[] = [
+  { id: 'interval',     label: 'Interval',      sub: 'recurrence trigger · periodic cadence' },
+  { id: 'alarm',        label: 'Exact Alarm',   sub: 'AlarmManager · precise timing' },
+  { id: 'notification', label: 'Notification',  sub: 'local notification delivery · one-shot' },
+  { id: 'time',         label: 'Time',          sub: 'one-shot · fires 10 s after scheduling' },
+  { id: 'background',   label: 'Background',    sub: 'WorkManager · BGTaskScheduler · deferrable', note: 'OS-timed' },
+  { id: 'appState',     label: 'App State',     sub: 'fires on foreground transition' },
+  { id: 'push',         label: 'Push',          sub: 'FCM · APNs remote message', note: 'native · ▶ simulates' },
+  { id: 'userInitiatedBackground', label: 'Continued Task', sub: 'BGContinuedProcessingTask', note: 'iOS 26' },
 ];
 
 export function TriggerSelector({
@@ -307,6 +314,11 @@ export function TriggerSelector({
               <Text style={[ts.lab, { color: selected ? theme.accent : theme.text }]}>{m.label}</Text>
               <Text style={[ts.sub, { color: theme.muted, fontFamily: MONO }]}>{m.sub}</Text>
             </View>
+            {m.note != null && (
+              <View style={[ts.note, { borderColor: theme.border, backgroundColor: theme.accentMuted }]}>
+                <Text style={[ts.noteText, { color: theme.muted }]}>{m.note}</Text>
+              </View>
+            )}
           </Pressable>
         );
       })}
@@ -329,6 +341,8 @@ const ts = StyleSheet.create({
   textBlock: { flex: 1 },
   lab: { fontSize: 13, fontWeight: '700' },
   sub: { fontSize: 10, marginTop: 1 },
+  note: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 5, borderWidth: StyleSheet.hairlineWidth },
+  noteText: { fontSize: 8, fontWeight: '800', letterSpacing: 0.5 },
 });
 
 // ─── Schedule selector ────────────────────────────────────────────────────────

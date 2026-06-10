@@ -16,7 +16,15 @@ import Conductor, {
   type TaskExecutionRecord,
 } from 'expo-conductor';
 
-export type TriggerMode = 'interval' | 'alarm' | 'notification';
+export type TriggerMode =
+  | 'interval'
+  | 'alarm'
+  | 'notification'
+  | 'time'
+  | 'background'
+  | 'appState'
+  | 'push'
+  | 'userInitiatedBackground';
 
 export interface ScheduleConfig {
   kind: 'interval' | 'daily' | 'weekly' | 'cron';

@@ -20,7 +20,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import Conductor, { Priority, type Recurrence, type WeightPreset } from 'expo-conductor';
+import Conductor, { Priority, type Recurrence, type Trigger, type WeightPreset } from 'expo-conductor';
 import { useTheme } from '../theme';
 import { useConductor, type ScheduleConfig } from '../state/ConductorProvider';
 import { Card } from '../components/Card';
@@ -176,27 +176,42 @@ export function LabScreen() {
   // Schedule / cancel
   // ---------------------------------------------------------------------------
 
-  const buildTriggers = useCallback((taskId: string, notifyOnRun: boolean) => {
+  const buildTriggers = useCallback((taskId: string, notifyOnRun: boolean): Trigger[] => {
     const recurrence = buildRecurrence(scheduleConfig);
-    const notifTrigger = notifyOnRun
-      ? [{ type: 'notification' as const, title: 'Lab Task', body: taskId, inSeconds: Math.max(10, Math.round((scheduleConfig.everyMs ?? 30_000) / 1000)), runInBackground: true }]
+    const notifTrigger: Trigger[] = notifyOnRun
+      ? [{ type: 'notification', title: 'Lab Task', body: taskId, inSeconds: Math.max(10, Math.round((scheduleConfig.everyMs ?? 30_000) / 1000)), runInBackground: true }]
       : [];
-    if (triggerMode === 'alarm') {
-      return [
-        { type: 'alarm' as const, at: Date.now() + 5_000, allowWhileIdle: true },
-        { type: 'recurrence' as const, recurrence },
-        ...notifTrigger,
-      ];
+    // Every mode is branched explicitly: a forgotten mode would otherwise silently fall
+    // through to a recurrence task (TS can't catch that with an if/else), so the `never`
+    // default keeps this exhaustive against the TriggerMode union.
+    switch (triggerMode) {
+      case 'interval':
+        return [{ type: 'recurrence', recurrence }, ...notifTrigger];
+      case 'alarm':
+        return [
+          { type: 'alarm', at: Date.now() + 5_000, allowWhileIdle: true },
+          { type: 'recurrence', recurrence },
+          ...notifTrigger,
+        ];
+      case 'notification':
+        return [{ type: 'notification', title: 'Lab Task', body: taskId, inSeconds: 10, runInBackground: true }];
+      case 'time':
+        return [{ type: 'time', inSeconds: 10 }, ...notifTrigger];
+      case 'background':
+        return [{ type: 'background', minimumIntervalMinutes: 15 }, ...notifTrigger];
+      case 'appState':
+        return [{ type: 'appState', on: 'foreground' }, ...notifTrigger];
+      case 'push':
+        // matchKey = taskId so a real FCM/APNs `data.conductorTask` could route to it; on
+        // web there is no push path, so the ▶ run button fires it by id (see hub caption).
+        return [{ type: 'push', matchKey: taskId }, ...notifTrigger];
+      case 'userInitiatedBackground':
+        return [{ type: 'userInitiatedBackground' }, ...notifTrigger];
+      default: {
+        const _exhaustive: never = triggerMode;
+        return _exhaustive;
+      }
     }
-    if (triggerMode === 'notification') {
-      return [
-        { type: 'notification' as const, title: 'Lab Task', body: taskId, inSeconds: 10, runInBackground: true },
-      ];
-    }
-    return [
-      { type: 'recurrence' as const, recurrence },
-      ...notifTrigger,
-    ];
   }, [triggerMode, scheduleConfig]);
 
   const scheduleActive = useCallback(async () => {
