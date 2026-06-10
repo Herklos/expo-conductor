@@ -26,6 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     clearing `nextRunAt` is what prevents a duplicate banner. A pure-JS one-shot (no notification) is
     unaffected (it still replays). Use a `native`/`rust` handler for guaranteed headless work.
 
+- **Config plugin (Android):** `enableForegroundService` no longer injects an
+  `<service android:name=".triggers.ConductorForegroundService">` manifest entry for a class that
+  does not exist. Foreground promotion is performed by `ConductorWorker` via WorkManager's
+  `setForeground(...)`, which supplies the service itself, so only the `FOREGROUND_SERVICE` /
+  `FOREGROUND_SERVICE_DATA_SYNC` permissions are added. The 0.4.0 "FCM Doze-bypass foreground
+  service" note below is corrected accordingly — the FCM receive path dispatches normally and
+  never started a custom foreground service.
+
 ## [0.4.0] - 2026-06-09
 
 ### Added
@@ -66,12 +74,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   trigger. No new API surface — the behavior is gated on the existing
   `BackgroundTaskTrigger.bgProcessing` field.
 
-- **FCM Doze-bypass foreground service** (Android only) — when a task has
-  `policy.foreground: true` and is matched by an FCM high-priority push, `ConductorFcmService`
-  now starts a foreground service (`ConductorForegroundService`) instead of enqueuing a
-  WorkManager job, bypassing Doze entirely. Requires `enableForegroundService: true` in the
-  config plugin (injects `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_DATA_SYNC`
-  permissions and the service declaration).
+- **Foreground-service promotion for `policy.foreground: true`** (Android only) — a task with
+  `policy.foreground: true` runs as a `ConductorWorker` WorkManager job that promotes itself to a
+  foreground service via `setForeground(ForegroundInfo)` (dataSync type), so it is exempt from Doze
+  and the background-CPU cap while it runs (useful for FCM-woken work that must finish reliably).
+  Requires `enableForegroundService: true` in the config plugin (injects `FOREGROUND_SERVICE` +
+  `FOREGROUND_SERVICE_DATA_SYNC` permissions). WorkManager supplies the foreground service itself,
+  so no app-declared `<service>` is needed.
 
 ### Changed
 

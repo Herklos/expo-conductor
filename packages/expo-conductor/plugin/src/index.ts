@@ -12,8 +12,8 @@ import {
  * background-task identifiers and (optionally) Firebase Cloud Messaging needed by the
  * conductor triggers. Add to app.json:
  *
- *   ["expo-conductor", { "enableFcm": false, "enableExactAlarms": true,
- *                        "backgroundTaskIdentifiers": ["com.expoconductor.refresh"] }]
+ *   ["@drakkar.software/expo-conductor", { "enableFcm": false, "enableExactAlarms": true,
+ *                        "backgroundTaskIdentifiers": ["com.myapp.sync"] }]
  */
 export interface ConductorPluginOptions {
   /** Compile + register the Firebase Cloud Messaging trigger (requires google-services). */
@@ -132,27 +132,15 @@ const withConductorAndroid: ConfigPlugin<ConductorPluginOptions> = (config, opti
     return cfg;
   });
 
-  // FOREGROUND_SERVICE permissions + service declaration: required for FCM Doze-bypass (#2).
+  // FOREGROUND_SERVICE permissions for `policy.foreground: true` tasks: ConductorWorker
+  // promotes its WorkManager job to a foreground service via setForeground(ForegroundInfo)
+  // (dataSync type). WorkManager supplies the foreground service itself, so no app-declared
+  // <service> is required here.
   if (options.enableForegroundService) {
     config = AndroidConfig.Permissions.withPermissions(config, [
       'android.permission.FOREGROUND_SERVICE',
       'android.permission.FOREGROUND_SERVICE_DATA_SYNC',
     ]);
-    config = withAndroidManifest(config, (cfg) => {
-      const app = AndroidConfig.Manifest.getMainApplicationOrThrow(cfg.modResults);
-      app.service = app.service ?? [];
-      const fgsName = 'expo.modules.conductor.triggers.ConductorForegroundService';
-      if (!app.service.some((s) => s.$['android:name'] === fgsName)) {
-        app.service.push({
-          $: {
-            'android:name': fgsName,
-            'android:exported': 'false',
-            'android:foregroundServiceType': 'dataSync',
-          },
-        } as never);
-      }
-      return cfg;
-    });
   }
 
   // The ConductorAlarmReceiver / BootReceiver are declared in the library's own
