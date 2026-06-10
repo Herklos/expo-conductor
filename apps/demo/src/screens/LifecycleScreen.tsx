@@ -11,7 +11,6 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Updates from 'expo-updates';
 import Conductor from 'expo-conductor';
 import {
@@ -400,7 +399,6 @@ const ir = StyleSheet.create({
 
 export function LifecycleScreen() {
   const theme = useTheme();
-  const insets = useSafeAreaInsets();
   const { tasks, refresh, triggerMode, setTriggerMode, scheduleConfig, setScheduleConfig } = useConductor();
   const [conductorStatus, setConductorStatus] = useState<string | null>(null);
   const [permGranted, setPermGranted] = useState<boolean | null>(null);
@@ -424,18 +422,15 @@ export function LifecycleScreen() {
 
   return (
     <View style={[s.root, { backgroundColor: theme.bg }]}>
-      <ScrollView contentContainerStyle={[s.scroll, { paddingTop: insets.top + 16 }]}>
+      <ScrollView contentContainerStyle={s.scroll}>
 
-        {/* ── Page header ── */}
-        <View style={[s.header, { borderBottomColor: theme.border }]}>
-          <View style={s.headerRow}>
-            <StatusDot color={
-              conductorStatus === 'available' ? theme.success
-              : conductorStatus === 'restricted' ? theme.warning
-              : theme.muted
-            } />
-            <Text style={[s.headerTitle, { color: theme.text }]}>SYSTEM CONTROL</Text>
-          </View>
+        {/* ── Status row (title is provided by the Stack header) ── */}
+        <View style={s.statusRow}>
+          <StatusDot color={
+            conductorStatus === 'available' ? theme.success
+            : conductorStatus === 'restricted' ? theme.warning
+            : theme.muted
+          } />
           <Text style={[s.headerCount, { color: theme.muted, fontFamily: MONO }]}>
             {tasks.length} task{tasks.length !== 1 ? 's' : ''} registered
           </Text>
@@ -685,18 +680,9 @@ export function LifecycleScreen() {
 
 const s = StyleSheet.create({
   root: { flex: 1 },
-  scroll: { paddingHorizontal: 16, paddingBottom: 16 },
+  scroll: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 16 },
 
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingBottom: 12,
-    marginBottom: 4,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  headerTitle: { fontSize: 15, fontWeight: '800', letterSpacing: 2 },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   headerCount: { fontSize: 11 },
 
   banner: {

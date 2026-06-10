@@ -15,7 +15,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Stack } from 'expo-router';
 import { LegendList } from '@legendapp/list/react-native';
 import { reconcile, type ReconcileResult, type MatchedOccurrence, type ExpectedOccurrence } from 'expo-conductor';
 import type { TaskExecutionRecord } from 'expo-conductor';
@@ -42,7 +42,6 @@ const FILTERS: { id: FilterKey; label: string }[] = [
 
 export function ReconciliationScreen() {
   const theme = useTheme();
-  const insets = useSafeAreaInsets();
   const { tasks, records, refreshHistory } = useConductor();
   const [activeFilter, setActiveFilter] = useState<FilterKey>('all');
   const [windowH, setWindowH] = useState(24);
@@ -102,14 +101,6 @@ export function ReconciliationScreen() {
 
   const listHeader = (
     <>
-      {/* Header */}
-      <View style={[styles.header, { borderBottomColor: theme.border, paddingTop: insets.top + 10 }]}>
-        <Text style={[styles.title, { color: theme.text }]}>Reconciliation</Text>
-        <Pressable onPress={refreshHistory} style={styles.refreshBtn}>
-          <Text style={[styles.refreshText, { color: theme.accent }]}>↻</Text>
-        </Pressable>
-      </View>
-
       {/* Summary + window selector */}
       <View style={styles.summaryArea}>
         <View style={styles.summaryRow}>
@@ -197,16 +188,27 @@ export function ReconciliationScreen() {
   );
 
   return (
-    <LegendList<DisplayItem>
-      style={[styles.root, { backgroundColor: theme.bg }]}
-      data={filteredItems}
-      keyExtractor={(item: DisplayItem, i: number) => `${item.kind}-${i}`}
-      renderItem={({ item }: { item: DisplayItem }) => <ReconcileRow item={item} theme={theme} />}
-      ListHeaderComponent={listHeader}
-      contentContainerStyle={styles.list}
-      estimatedItemSize={72}
-      recycleItems
-    />
+    <>
+      <Stack.Screen
+        options={{
+          headerRight: () => (
+            <Pressable onPress={refreshHistory} hitSlop={8}>
+              <Text style={[styles.refreshText, { color: theme.accent }]}>↻</Text>
+            </Pressable>
+          ),
+        }}
+      />
+      <LegendList<DisplayItem>
+        style={[styles.root, { backgroundColor: theme.bg }]}
+        data={filteredItems}
+        keyExtractor={(item: DisplayItem, i: number) => `${item.kind}-${i}`}
+        renderItem={({ item }: { item: DisplayItem }) => <ReconcileRow item={item} theme={theme} />}
+        ListHeaderComponent={listHeader}
+        contentContainerStyle={styles.list}
+        estimatedItemSize={72}
+        recycleItems
+      />
+    </>
   );
 }
 
@@ -300,16 +302,6 @@ function ReconcileRow({ item, theme }: ReconcileRowProps) {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  header: {
-    paddingHorizontal: 16,
-    paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-  },
-  title: { fontSize: 20, fontWeight: '700' },
-  refreshBtn: { padding: 4 },
   refreshText: { fontSize: 20, fontWeight: '700' },
   summaryArea: { padding: 12 },
   summaryRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },

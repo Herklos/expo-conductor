@@ -1,8 +1,7 @@
-import { registerRootComponent } from 'expo';
-
-// Register task handlers at module scope (before the app mounts) so they survive a
-// headless background/alarm/push relaunch. See src/tasks.ts.
+// Custom entry: register task handlers at MODULE scope BEFORE expo-router mounts the app.
+//
+// `./src/tasks` calls Conductor.defineTask(...) on import. The OS can relaunch the app
+// headlessly (background / alarm / push) with no React tree mounting, so handlers must be
+// registered here — at entry eval, before `expo-router/entry` boots the navigator.
 import './src/tasks';
-import App from './src/App';
-
-registerRootComponent(App);
+import 'expo-router/entry';

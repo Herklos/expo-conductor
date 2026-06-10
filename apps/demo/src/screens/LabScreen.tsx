@@ -296,7 +296,6 @@ export function LabScreen() {
       style={{ flex: 1, backgroundColor: theme.bg }}
       contentContainerStyle={styles.content}
     >
-      <Text style={[styles.screenTitle, { color: theme.text }]}>CROSS-LANGUAGE LAB</Text>
       <Text style={[styles.screenSub, { color: theme.muted }]}>
         Tap a cell to activate · tap again to expand settings · schedule to run
       </Text>
@@ -610,8 +609,7 @@ function CellSettings({ langLabel, langColor, cell, onChange, onDeactivate, them
 // ---------------------------------------------------------------------------
 
 const styles = StyleSheet.create({
-  content: { padding: 16, paddingTop: 56 },
-  screenTitle: { fontSize: 14, fontWeight: '800', letterSpacing: 2, marginBottom: 4 },
+  content: { padding: 16 },
   screenSub: { fontSize: 11, marginBottom: 16, lineHeight: 17 },
   actionRow: { flexDirection: 'row', gap: 10, marginBottom: 8 },
   btn: { flex: 1, paddingVertical: 10, borderRadius: 6, alignItems: 'center' },

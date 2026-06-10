@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **iOS + Android (headless one-shot):** a one-shot task that fires on the **headless** path (an OS
+  alarm/notification wake reaching `dispatchHeadless` with no live module instance) now **clears its
+  `nextRunAt`** when nothing future remains — exactly as the live `reschedule` already did.
+  Previously the headless path early-returned on a null next-run and left the stale **past**
+  `nextRunAt` in the store, so the next `runDueTasks()` scan re-dispatched the already-fired one-shot
+  **once** (a duplicate native run / duplicate notification banner) before the live path self-healed
+  it. This closes the residual half of the 0.2.0 "fired one-shot clears `nextRunAt`" fix (#10), whose
+  live-path portion was correct but whose headless path was not. Found by a source re-verification of
+  the 0.1.1/0.2.0 audit items against the 0.4.0 code. The reference contract is locked by a new
+  `WebSchedulerEngine` Jest test; the native edits (`ExpoConductorModule.kt`,
+  `ExpoConductorModule.swift`) compile in a full app build.
+
 ## [0.4.0] - 2026-06-09
 
 ### Added

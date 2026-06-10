@@ -4,5 +4,10 @@
     "strict": true,
     "jsx": "react-jsx"
   },
-  "include": ["src", "index.ts", "app.json"]
+  "include": [
+    "src",
+    "app",
+    "index.ts",
+    "app.json"
+  ]
 }

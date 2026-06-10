@@ -12,7 +12,6 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LegendList } from '@legendapp/list/react-native';
 import type { TaskExecutionRecord } from 'expo-conductor';
 import { useTheme, type Theme } from '../theme';
@@ -290,7 +289,6 @@ const lt = StyleSheet.create({
 
 export function LogsScreen() {
   const theme = useTheme();
-  const insets = useSafeAreaInsets();
   const { records, liveLog } = useConductor();
   const [activeTab, setActiveTab] = useState<LogTab>('history');
 
@@ -298,13 +296,10 @@ export function LogsScreen() {
 
   return (
     <View style={[s.root, { backgroundColor: theme.bg }]}>
-      {/* Header */}
-      <View style={[s.header, { borderBottomColor: theme.border, paddingTop: insets.top + 10 }]}>
-        <View style={s.headerLeft}>
-          <Text style={[s.title, { color: theme.text }]}>Logs</Text>
-          <View style={[s.countPill, { backgroundColor: theme.card, borderColor: theme.border }]}>
-            <Text style={[s.countText, { color: theme.muted }]}>{count}</Text>
-          </View>
+      {/* Toolbar — history/live toggle + count (the screen title is the Stack header) */}
+      <View style={[s.header, { borderBottomColor: theme.border }]}>
+        <View style={[s.countPill, { backgroundColor: theme.card, borderColor: theme.border }]}>
+          <Text style={[s.countText, { color: theme.muted }]}>{count}</Text>
         </View>
         <TabPill active={activeTab} onChange={setActiveTab} theme={theme} />
       </View>
@@ -325,11 +320,10 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
+    paddingTop: 10,
     paddingBottom: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  title: { fontSize: 20, fontWeight: '700' },
   countPill: {
     paddingHorizontal: 8,
     paddingVertical: 2,

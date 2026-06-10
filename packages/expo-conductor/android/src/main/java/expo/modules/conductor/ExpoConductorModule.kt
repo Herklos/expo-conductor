@@ -490,11 +490,17 @@ class ExpoConductorModule : Module() {
       // handler with no notification did nothing, so leave nextRunAt to replay on the
       // next foreground launch instead of silently losing the occurrence.
       if (!isNative && !isRust && notif == null) return
-      // min(next recurrence, future one-shots), matching the live reschedule + Web; null -> nothing
-      // future, so don't re-arm (a fired one-shot is done).
+      // min(next recurrence, future one-shots), matching the live reschedule + Web. When null,
+      // nothing is future: a fired one-shot is done, so CLEAR its stale nextRunAt (persist null,
+      // exactly like reschedule) — otherwise runDueTasksAsync re-dispatches it once on the next scan.
       val recurrence = TaskMapper.recurrence(task)
       val (next, nextFiredBy) = TaskMapper.computeNextRunAt(task, recurrence, System.currentTimeMillis(), futureOnly = true)
-      if (next == null) return
+      if (next == null) {
+        task.put("nextRunAt", JSONObject.NULL)
+        task.put("nextFiredBy", JSONObject.NULL)
+        TaskStore(context).upsert(task)
+        return
+      }
       task.put("nextRunAt", next)
       if (nextFiredBy == null) task.put("nextFiredBy", JSONObject.NULL) else task.put("nextFiredBy", nextFiredBy)
       TaskStore(context).upsert(task)

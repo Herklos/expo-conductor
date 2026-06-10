@@ -360,6 +360,30 @@ describe('WebSchedulerEngine', () => {
     expect(fired).toContain(10_000);
   });
 
+  it('fires a one-shot once via the due-pass and clears its nextRunAt (no re-dispatch) (#10)', async () => {
+    // Timers disabled so dispatch happens ONLY through the explicit due-pass — this mirrors the
+    // native headless path (an alarm/notification OS wake -> dispatchHeadless), which must clear a
+    // fired one-shot's nextRunAt the same way `reschedule` does, or runDueTasks re-dispatches it
+    // once on the next scan (Android #10 / the matching iOS gap). This locks the reference contract
+    // the Kotlin/Swift headless paths mirror.
+    const engine = new WebSchedulerEngine({ now: () => 5000, setTimer: () => 0, clearTimer: () => {} });
+    const fired: string[] = [];
+    engine.addListener('onTaskExecute', (p) => fired.push(p.taskId));
+
+    await engine.registerTaskAsync({ id: 'once', triggers: [{ type: 'time', at: 1000 }] }); // already past (now=5000)
+
+    expect(await engine.runDueTasksAsync()).toBe(1); // fires exactly once
+    expect(fired).toEqual(['once']);
+
+    // The fired one-shot has no future trigger, so its nextRunAt must be cleared.
+    const after = await engine.getTasksAsync();
+    expect(after.find((t) => t.id === 'once')?.nextRunAt ?? null).toBeNull();
+
+    // A second due-pass must NOT re-dispatch it.
+    expect(await engine.runDueTasksAsync()).toBe(0);
+    expect(fired).toEqual(['once']);
+  });
+
   it('retries a failed task with backoff', async () => {
     const h = makeHarness();
     const engine = new WebSchedulerEngine({ now: h.now, setTimer: h.setTimer, clearTimer: h.clearTimer });

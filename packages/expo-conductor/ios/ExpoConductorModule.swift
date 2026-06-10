@@ -250,11 +250,18 @@ public class ExpoConductorModule: Module {
     // chain dies). A pure JS handler with no notification did nothing headless, so leave
     // nextRunAt to replay on the next foreground launch.
     guard isNative || isRust || notif != nil else { return }
-    // min(next recurrence, future one-shots), matching the live reschedule + Web; nil -> nothing
-    // future, so don't re-arm (a fired one-shot is done).
+    // min(next recurrence, future one-shots), matching the live reschedule + Web. When nil,
+    // nothing is future: a fired one-shot is done, so CLEAR its stale nextRunAt (persist nil,
+    // exactly like reschedule) — otherwise runDueBackgroundTasks re-dispatches it once on the next wake.
     let recurrence = TaskMapper.parseRecurrence(task)
     let nextResult = TaskMapper.computeNextRunAt(task, recurrence, now, futureOnly: true)
-    guard let next = nextResult.nextRunAt else { return }
+    guard let next = nextResult.nextRunAt else {
+      var cleared = task
+      cleared["nextRunAt"] = NSNull()
+      cleared["nextFiredBy"] = NSNull()
+      TaskStore().upsert(cleared)
+      return
+    }
     var updated = task
     updated["nextRunAt"] = next
     updated["nextFiredBy"] = nextResult.firedBy ?? NSNull()
