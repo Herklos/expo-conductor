@@ -123,8 +123,8 @@ const { matched, missed, unexpected, aborted } = reconcile(tasks, records, {
 tolerance). `aborted` = matched records whose `result` is `'failed'` or `'error'`.
 `unexpected` = records with no expected occurrence (e.g. a manually triggered one-shot).
 
-Reconciliation is exact for `time`, `recurrence`, and `alarm` triggers. For `background`
-and `push` triggers it is **advisory** — the OS decides timing, not the scheduler.
+Reconciliation is exact for `time`, `recurrence`, and `alarm` triggers. For `background`,
+`push`, and `appState` triggers it is **advisory** — the OS decides timing, not the scheduler.
 
 ## v0.4.0 additions
 
