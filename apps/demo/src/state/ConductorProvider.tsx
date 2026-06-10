@@ -38,7 +38,7 @@ export interface ScheduleConfig {
 
 const DEFAULT_SCHEDULE: ScheduleConfig = {
   kind: 'interval',
-  everyMs: 30_000,
+  everyMs: 900_000,
   hour: 9,
   minute: 0,
   weekday: 1,
