@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-06-10
+
 ### Fixed
 
 - **iOS + Android (headless one-shot):** a one-shot task that fires on the **headless** path (an OS
@@ -365,7 +367,8 @@ cannot run after the app is terminated (use a **native** handler for headless wo
 native `BGTaskScheduler` / `WorkManager` ↔ `expo-background-task` swap is deferred pending
 on-device verification.
 
-[Unreleased]: https://github.com/herklos/expo-conductor/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/herklos/expo-conductor/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/herklos/expo-conductor/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/herklos/expo-conductor/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/herklos/expo-conductor/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/herklos/expo-conductor/compare/v0.2.1...v0.2.2
