@@ -392,12 +392,14 @@ const ts = StyleSheet.create({
 // ─── Schedule selector ────────────────────────────────────────────────────────
 
 const INTERVAL_PRESETS: { label: string; ms: number }[] = [
-  { label: '15 s', ms: 15_000 },
-  { label: '30 s', ms: 30_000 },
-  { label: '1 m',  ms: 60_000 },
-  { label: '5 m',  ms: 300_000 },
   { label: '15 m', ms: 900_000 },
+  { label: '30 m', ms: 1_800_000 },
   { label: '1 h',  ms: 3_600_000 },
+  { label: '2 h',  ms: 7_200_000 },
+  { label: '4 h',  ms: 14_400_000 },
+  { label: '8 h',  ms: 28_800_000 },
+  { label: '12 h', ms: 43_200_000 },
+  { label: '24 h', ms: 86_400_000 },
 ];
 
 const CRON_PRESETS: { label: string; expr: string }[] = [
