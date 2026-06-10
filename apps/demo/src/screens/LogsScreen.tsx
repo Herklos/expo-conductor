@@ -81,9 +81,21 @@ function HistoryTab({ theme }: { theme: Theme }) {
 
   const sorted = [...filtered].sort((a, b) => b.firedAt - a.firedAt);
 
-  const toolbar = (
-    <>
-      <View style={[ht.toolbar, { borderBottomColor: theme.border }]}>
+  // The filter/refresh/clear toolbar is the list's "legend" — pin it as a sibling
+  // above the list so it stays put while rows scroll under it.
+  const empty = (
+    <View style={ht.empty}>
+      <Text style={[ht.emptyText, { color: theme.muted }]}>
+        {records.length === 0
+          ? 'No executions recorded yet.\nSchedule a task and let it fire!'
+          : 'No results match the filter.'}
+      </Text>
+    </View>
+  );
+
+  return (
+    <View style={{ flex: 1 }}>
+      <View style={[ht.toolbar, { backgroundColor: theme.bg, borderBottomColor: theme.border }]}>
         <TextInput
           style={[ht.input, { backgroundColor: theme.card, borderColor: theme.border, color: theme.text, flex: 1 }]}
           placeholder="Filter by task ID or trigger…"
@@ -100,29 +112,17 @@ function HistoryTab({ theme }: { theme: Theme }) {
           <Text style={[ht.actText, { color: theme.danger }]}>🗑</Text>
         </Pressable>
       </View>
-      {sorted.length === 0 && (
-        <View style={ht.empty}>
-          <Text style={[ht.emptyText, { color: theme.muted }]}>
-            {records.length === 0
-              ? 'No executions recorded yet.\nSchedule a task and let it fire!'
-              : 'No results match the filter.'}
-          </Text>
-        </View>
-      )}
-    </>
-  );
-
-  return (
-    <LegendList<TaskExecutionRecord>
-      style={{ flex: 1 }}
-      data={sorted}
-      keyExtractor={(item: TaskExecutionRecord) => `${item.taskId}-${item.firedAt}-${item.attempt}`}
-      renderItem={({ item }: { item: TaskExecutionRecord }) => <HistoryRow record={item} theme={theme} />}
-      ListHeaderComponent={toolbar}
-      contentContainerStyle={ht.list}
-      estimatedItemSize={72}
-      recycleItems
-    />
+      <LegendList<TaskExecutionRecord>
+        style={{ flex: 1 }}
+        data={sorted}
+        keyExtractor={(item: TaskExecutionRecord) => `${item.taskId}-${item.firedAt}-${item.attempt}`}
+        renderItem={({ item }: { item: TaskExecutionRecord }) => <HistoryRow record={item} theme={theme} />}
+        ListEmptyComponent={empty}
+        contentContainerStyle={ht.list}
+        estimatedItemSize={72}
+        recycleItems
+      />
+    </View>
   );
 }
 
@@ -224,9 +224,18 @@ function liveColor(line: string, theme: Theme): string {
 function LiveTab({ theme }: { theme: Theme }) {
   const { liveLog, clearLiveLog } = useConductor();
 
-  const toolbar = (
-    <>
-      <View style={[lt.toolbar, { borderBottomColor: theme.border }]}>
+  const empty = (
+    <View style={lt.empty}>
+      <Text style={[lt.emptyText, { color: theme.muted, fontFamily: MONO }]}>
+        — waiting for events —
+      </Text>
+    </View>
+  );
+
+  return (
+    <View style={{ flex: 1 }}>
+      {/* Color legend + count + clear, pinned so it survives scrolling. */}
+      <View style={[lt.toolbar, { backgroundColor: theme.bg, borderBottomColor: theme.border }]}>
         <View style={lt.dots}>
           <View style={[lt.dot, { backgroundColor: theme.danger }]} />
           <View style={[lt.dot, { backgroundColor: theme.warning }]} />
@@ -239,29 +248,19 @@ function LiveTab({ theme }: { theme: Theme }) {
           <Text style={[lt.actText, { color: theme.danger }]}>🗑</Text>
         </Pressable>
       </View>
-      {liveLog.length === 0 && (
-        <View style={lt.empty}>
-          <Text style={[lt.emptyText, { color: theme.muted, fontFamily: MONO }]}>
-            — waiting for events —
-          </Text>
-        </View>
-      )}
-    </>
-  );
-
-  return (
-    <LegendList<string>
-      style={{ flex: 1 }}
-      data={liveLog}
-      keyExtractor={(_: string, i: number) => String(i)}
-      renderItem={({ item }: { item: string }) => (
-        <Text style={[lt.line, { color: liveColor(item, theme), fontFamily: MONO }]}>{item}</Text>
-      )}
-      ListHeaderComponent={toolbar}
-      contentContainerStyle={lt.list}
-      estimatedItemSize={22}
-      recycleItems
-    />
+      <LegendList<string>
+        style={{ flex: 1 }}
+        data={liveLog}
+        keyExtractor={(_: string, i: number) => String(i)}
+        renderItem={({ item }: { item: string }) => (
+          <Text style={[lt.line, { color: liveColor(item, theme), fontFamily: MONO }]}>{item}</Text>
+        )}
+        ListEmptyComponent={empty}
+        contentContainerStyle={lt.list}
+        estimatedItemSize={22}
+        recycleItems
+      />
+    </View>
   );
 }
 

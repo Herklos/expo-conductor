@@ -253,6 +253,10 @@ public class ExpoConductorModule: Module {
     // min(next recurrence, future one-shots), matching the live reschedule + Web. When nil,
     // nothing is future: a fired one-shot is done, so CLEAR its stale nextRunAt (persist nil,
     // exactly like reschedule) — otherwise runDueBackgroundTasks re-dispatches it once on the next wake.
+    // Tradeoff: a JS-handler + notification one-shot fired here loses its JS replay (headless JS is
+    // best-effort — only a native/rust handler ran, the banner already showed); clearing is what
+    // prevents a duplicate banner. A pure-JS one-shot (no notification) returned early above and
+    // still replays. Use a native/rust handler for guaranteed headless work.
     let recurrence = TaskMapper.parseRecurrence(task)
     let nextResult = TaskMapper.computeNextRunAt(task, recurrence, now, futureOnly: true)
     guard let next = nextResult.nextRunAt else {

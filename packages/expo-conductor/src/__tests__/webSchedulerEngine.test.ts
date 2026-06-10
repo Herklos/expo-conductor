@@ -361,11 +361,13 @@ describe('WebSchedulerEngine', () => {
   });
 
   it('fires a one-shot once via the due-pass and clears its nextRunAt (no re-dispatch) (#10)', async () => {
-    // Timers disabled so dispatch happens ONLY through the explicit due-pass — this mirrors the
-    // native headless path (an alarm/notification OS wake -> dispatchHeadless), which must clear a
-    // fired one-shot's nextRunAt the same way `reschedule` does, or runDueTasks re-dispatches it
-    // once on the next scan (Android #10 / the matching iOS gap). This locks the reference contract
-    // the Kotlin/Swift headless paths mirror.
+    // Timers disabled so dispatch happens ONLY through the explicit due-pass. NOTE: Web has no
+    // headless path, so this is a CONTRACT LOCK on the reference engine (the behavior the Kotlin/Swift
+    // `dispatchHeadless` paths must mirror), NOT a regression guard for the native #10 fix itself —
+    // it stays green even if the native edits are reverted. The native fix is verified by code review
+    // + the next device build (and the §2 on-device checklist). The contract: a fired one-shot with
+    // no future trigger must clear its nextRunAt the same way `reschedule` does, or a later due-pass
+    // re-dispatches it (Android #10 / the matching iOS gap).
     const engine = new WebSchedulerEngine({ now: () => 5000, setTimer: () => 0, clearTimer: () => {} });
     const fired: string[] = [];
     engine.addListener('onTaskExecute', (p) => fired.push(p.taskId));

@@ -137,18 +137,6 @@ export function SystemHubScreen() {
           </View>
         </Section>
 
-        {/* ── Registry summary → full table ── */}
-        <Section title="TASK REGISTRY" theme={theme}>
-          <NavRow
-            glyph="🗂"
-            label="Registered tasks"
-            sub={nextRun != null ? `next run ${fmtDateTime(nextRun)}` : 'no future occurrences'}
-            hint={`${tasks.length}`}
-            theme={theme}
-            onPress={go('/system/tasks')}
-          />
-        </Section>
-
         {/* ── Pushed diagnostics ── */}
         <Section
           title="DIAGNOSTICS & SETUP"
@@ -182,6 +170,14 @@ export function SystemHubScreen() {
             sub="running bundle · channel · embedded/OTA"
             theme={theme}
             onPress={go('/system/eas')}
+          />
+          <NavRow
+            glyph="🗂"
+            label="Registered tasks"
+            sub={nextRun != null ? `next run ${fmtDateTime(nextRun)}` : 'no future occurrences'}
+            hint={`${tasks.length}`}
+            theme={theme}
+            onPress={go('/system/tasks')}
           />
         </Section>
 

@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the 0.1.1/0.2.0 audit items against the 0.4.0 code. The reference contract is locked by a new
   `WebSchedulerEngine` Jest test; the native edits (`ExpoConductorModule.kt`,
   `ExpoConductorModule.swift`) compile in a full app build.
+  - **Consequence (intended):** a one-shot fired on the headless path that has a `notification`
+    trigger **and** a JS handler no longer replays its JS handler on a later live tick — headless JS
+    is best-effort, only a native/rust handler runs headless, and the notification already showed, so
+    clearing `nextRunAt` is what prevents a duplicate banner. A pure-JS one-shot (no notification) is
+    unaffected (it still replays). Use a `native`/`rust` handler for guaranteed headless work.
 
 ## [0.4.0] - 2026-06-09
 

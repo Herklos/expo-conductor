@@ -99,9 +99,10 @@ export function ReconciliationScreen() {
     return allItems.filter((i) => i.kind === activeFilter);
   }, [allItems, activeFilter]);
 
-  const listHeader = (
-    <>
-      {/* Summary + window selector */}
+  // Pinned legend — summary tallies, window selector, and the status filter chips
+  // stay fixed at the top so they don't scroll out of reach as the list grows.
+  const pinnedHeader = (
+    <View style={[styles.pinned, { backgroundColor: theme.bg, borderBottomColor: theme.border }]}>
       <View style={styles.summaryArea}>
         <View style={styles.summaryRow}>
           {summaryStats.map((s) => (
@@ -112,7 +113,6 @@ export function ReconciliationScreen() {
           ))}
         </View>
 
-        {/* Window selector */}
         <View style={styles.windowRow}>
           <Text style={[styles.windowLabel, { color: theme.muted }]}>Window:</Text>
           {[1, 6, 24].map((h) => (
@@ -137,15 +137,7 @@ export function ReconciliationScreen() {
         </View>
       </View>
 
-      {/* Advisory note */}
-      <View style={[styles.advisory, { backgroundColor: theme.accentMuted }]}>
-        <Text style={[styles.advisoryText, { color: theme.accent }]}>
-          ℹ️  background / push / appState tasks are excluded from expected occurrences
-          (OS decides timing) — only time, recurrence, and alarm tasks are exact.
-        </Text>
-      </View>
-
-      {/* Filter chips */}
+      {/* Filter chips — the status legend */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
         <View style={styles.filterRow}>
           {FILTERS.map((f) => (
@@ -173,18 +165,27 @@ export function ReconciliationScreen() {
           ))}
         </View>
       </ScrollView>
+    </View>
+  );
 
-      {/* Empty state */}
-      {filteredItems.length === 0 && (
-        <View style={styles.empty}>
-          <Text style={[styles.emptyText, { color: theme.muted }]}>
-            {allItems.length === 0
-              ? 'No data yet — schedule some tasks and come back.'
-              : `No ${activeFilter} items in the selected window.`}
-          </Text>
-        </View>
-      )}
-    </>
+  // The advisory note is explanatory, not a control, so it scrolls with the rows.
+  const scrollHeader = (
+    <View style={[styles.advisory, { backgroundColor: theme.accentMuted }]}>
+      <Text style={[styles.advisoryText, { color: theme.accent }]}>
+        ℹ️  background / push / appState tasks are excluded from expected occurrences
+        (OS decides timing) — only time, recurrence, and alarm tasks are exact.
+      </Text>
+    </View>
+  );
+
+  const empty = (
+    <View style={styles.empty}>
+      <Text style={[styles.emptyText, { color: theme.muted }]}>
+        {allItems.length === 0
+          ? 'No data yet — schedule some tasks and come back.'
+          : `No ${activeFilter} items in the selected window.`}
+      </Text>
+    </View>
   );
 
   return (
@@ -198,16 +199,20 @@ export function ReconciliationScreen() {
           ),
         }}
       />
-      <LegendList<DisplayItem>
-        style={[styles.root, { backgroundColor: theme.bg }]}
-        data={filteredItems}
-        keyExtractor={(item: DisplayItem, i: number) => `${item.kind}-${i}`}
-        renderItem={({ item }: { item: DisplayItem }) => <ReconcileRow item={item} theme={theme} />}
-        ListHeaderComponent={listHeader}
-        contentContainerStyle={styles.list}
-        estimatedItemSize={72}
-        recycleItems
-      />
+      <View style={[styles.root, { backgroundColor: theme.bg }]}>
+        {pinnedHeader}
+        <LegendList<DisplayItem>
+          style={{ flex: 1 }}
+          data={filteredItems}
+          keyExtractor={(item: DisplayItem, i: number) => `${item.kind}-${i}`}
+          renderItem={({ item }: { item: DisplayItem }) => <ReconcileRow item={item} theme={theme} />}
+          ListHeaderComponent={scrollHeader}
+          ListEmptyComponent={empty}
+          contentContainerStyle={styles.list}
+          estimatedItemSize={72}
+          recycleItems
+        />
+      </View>
     </>
   );
 }
@@ -303,7 +308,8 @@ function ReconcileRow({ item, theme }: ReconcileRowProps) {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   refreshText: { fontSize: 20, fontWeight: '700' },
-  summaryArea: { padding: 12 },
+  pinned: { borderBottomWidth: StyleSheet.hairlineWidth },
+  summaryArea: { paddingHorizontal: 12, paddingTop: 12, paddingBottom: 4 },
   summaryRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
   statCard: { flex: 1, borderRadius: 6, padding: 10, alignItems: 'center', borderWidth: 1.5 },
   statCount: { fontSize: 24, fontWeight: '800' },
@@ -318,7 +324,7 @@ const styles = StyleSheet.create({
   },
   windowChipText: { fontSize: 12, fontWeight: '600' },
   advisory: {
-    marginHorizontal: 12,
+    marginTop: 4,
     marginBottom: 8,
     padding: 10,
     borderRadius: 8,
