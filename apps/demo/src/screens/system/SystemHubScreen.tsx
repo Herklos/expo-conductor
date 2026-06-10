@@ -27,9 +27,9 @@ import {
 // on demand. Wording is deliberately honest: runNow fires a task by id, it does NOT exercise
 // the real push matchKey route or the native OS scheduler.
 const RUN_NOW_ONLY_NOTE: Partial<Record<TriggerMode, string>> = {
-  push: 'Push tasks fire when a matching FCM/APNs message arrives. There is no push on web — press ▶ on a scheduled task in the Lab to fire it as if a matching message arrived (fires by id, not real matchKey routing).',
+  push: 'Push tasks fire when your server sends a matching FCM/APNs data message — there is no local timer to wait on. Press ▶ on a scheduled task in the Lab to fire one now (by id, simulating a delivery — not real matchKey routing).',
   background: 'Background tasks are OS-timed (WorkManager / BGTaskScheduler) and won’t fire on a timer here. Press ▶ in the Lab to run one on demand.',
-  userInitiatedBackground: 'Continued tasks need iOS 26 and a live user action; elsewhere it is a no-op. Press ▶ in the Lab to run on demand.',
+  userInitiatedBackground: 'Continued tasks need iOS 26 and must originate from a live user action. Press ▶ in the Lab to run one on demand here.',
 };
 
 export function SystemHubScreen() {

@@ -269,17 +269,22 @@ const subStyles = StyleSheet.create({
 
 // ─── Trigger mode selector ────────────────────────────────────────────────────
 
-// `note` flags modes that don't fire on a timer here (web / cross-platform) and are
-// fired on demand with the ▶ run button in the Lab — see the caption in SystemHubScreen.
-export const TRIGGER_MODES: { id: TriggerMode; label: string; sub: string; note?: string }[] = [
+type ModeOS = 'ios' | 'android' | 'web';
+
+// `platforms` restricts a mode to the OSes that actually support it (per the README
+// availability matrix); omitted = available everywhere. `note` flags modes that don't
+// fire on a timer here and are run on demand with the ▶ button in the Lab — see the
+// caption in SystemHubScreen.
+export const TRIGGER_MODES: { id: TriggerMode; label: string; sub: string; note?: string; platforms?: ModeOS[] }[] = [
   { id: 'interval',     label: 'Interval',      sub: 'recurrence trigger · periodic cadence' },
   { id: 'alarm',        label: 'Exact Alarm',   sub: 'AlarmManager · precise timing' },
   { id: 'notification', label: 'Notification',  sub: 'local notification delivery · one-shot' },
   { id: 'time',         label: 'Time',          sub: 'one-shot · fires 10 s after scheduling' },
   { id: 'background',   label: 'Background',    sub: 'WorkManager · BGTaskScheduler · deferrable', note: 'OS-timed' },
   { id: 'appState',     label: 'App State',     sub: 'fires on foreground transition' },
-  { id: 'push',         label: 'Push',          sub: 'FCM · APNs remote message', note: 'native · ▶ simulates' },
-  { id: 'userInitiatedBackground', label: 'Continued Task', sub: 'BGContinuedProcessingTask', note: 'iOS 26' },
+  // push: native only (no push delivery on web). continued task: iOS 26+ only.
+  { id: 'push',         label: 'Push',          sub: 'FCM · APNs remote message', note: 'native · ▶ simulates', platforms: ['ios', 'android'] },
+  { id: 'userInitiatedBackground', label: 'Continued Task', sub: 'BGContinuedProcessingTask', note: 'iOS 26', platforms: ['ios'] },
 ];
 
 export function TriggerSelector({
@@ -291,9 +296,13 @@ export function TriggerSelector({
   onChange: (m: TriggerMode) => void;
   theme: Theme;
 }) {
+  // Hide modes the running platform can't deliver (push on web; continued task off iOS).
+  const modes = TRIGGER_MODES.filter(
+    (m) => m.platforms == null || m.platforms.includes(Platform.OS as ModeOS),
+  );
   return (
     <View style={ts.wrap}>
-      {TRIGGER_MODES.map((m) => {
+      {modes.map((m) => {
         const selected = m.id === value;
         return (
           <Pressable
