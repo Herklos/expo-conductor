@@ -1,14 +1,12 @@
+<div align="center">
+  <img src="./icon.png" alt="expo-conductor" width="120" height="120" />
+</div>
+
 # expo-conductor
 
-> Declarative background work for Expo — **priority, resource budgeting, recurrence, and
-> constraints** — run by a **native-first** engine on iOS (Swift), Android (Kotlin), and Web
-> (TypeScript).
+> **Declarative background work** for Expo with priority, resource budgeting, recurrence, and constraints — backed by a **native-first engine** on iOS, Android, and Web.
 
-Most schedulers hand you a timer and a callback. `expo-conductor` lets you describe the whole
-*policy* of a job — **when** it may run, **how important** it is, **how expensive** it is, and
-**what conditions** it needs — then maps that onto the right OS primitive (WorkManager,
-AlarmManager, BGTaskScheduler, local notifications, FCM/APNs push) and decides *whether and when*
-each task actually runs, using one shared, heavily-tested decision engine.
+Most schedulers hand you a timer and a callback. `expo-conductor` lets you *declare* the whole **policy** of a job — when it may run, how important it is, how expensive it is, and what conditions it needs — then intelligently dispatches it to the right OS primitive (WorkManager, AlarmManager, BGTaskScheduler, local notifications, FCM/APNs) and decides **whether and when** it actually executes, using one shared, heavily-tested engine across all three platforms.
 
 ### Why reach for it
 
